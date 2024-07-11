@@ -1,16 +1,16 @@
 {
   "files": {
-    "main.css": "/WaterSuppliers/static/css/main.726f6fb0.css",
-    "main.js": "/WaterSuppliers/static/js/main.b1b76fdc.js",
+    "main.css": "/WaterSuppliers/static/css/main.1ad2367f.css",
+    "main.js": "/WaterSuppliers/static/js/main.b6eefcda.js",
     "static/js/453.bf495ba8.chunk.js": "/WaterSuppliers/static/js/453.bf495ba8.chunk.js",
     "static/media/tanker.png": "/WaterSuppliers/static/media/tanker.41bfba218ebf32df5bb0.png",
     "index.html": "/WaterSuppliers/index.html",
-    "main.726f6fb0.css.map": "/WaterSuppliers/static/css/main.726f6fb0.css.map",
-    "main.b1b76fdc.js.map": "/WaterSuppliers/static/js/main.b1b76fdc.js.map",
+    "main.1ad2367f.css.map": "/WaterSuppliers/static/css/main.1ad2367f.css.map",
+    "main.b6eefcda.js.map": "/WaterSuppliers/static/js/main.b6eefcda.js.map",
     "453.bf495ba8.chunk.js.map": "/WaterSuppliers/static/js/453.bf495ba8.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.726f6fb0.css",
-    "static/js/main.b1b76fdc.js"
+    "static/css/main.1ad2367f.css",
+    "static/js/main.b6eefcda.js"
   ]
 }
