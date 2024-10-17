@@ -1,0 +1,31 @@
+import pandas as pd
+from sklearn.metrics import confusion_matrix
+
+# Load your datasets
+df_main = pd.read_csv('main_dataset.csv')  # your original dataset
+df_age = pd.read_csv('age_dataset.csv')  # dataset containing age_grp_cd
+
+# Merge the age data with the main dataset
+df = pd.merge(df_main, df_age[['PRTCP_ID', 'Age_grp_cd']], on='PRTCP_ID')
+
+# Make predictions on the dataset (assuming your model is already trained as `model`)
+X = df.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])  # Exclude 'age_grp_cd' and 'PRTCP_ID' from features
+y_true = df['STP_DFR_TRGT']  # Actual labels
+y_pred = model.predict(X)
+
+# Separate predictions by age group
+age_group_0_38 = df[df['Age_grp_cd'] == 1]
+age_group_above_38 = df[df['Age_grp_cd'] == 0]
+
+# Disparate impact calculation
+def disparate_impact(y_pred, y_true):
+    cm = confusion_matrix(y_true, y_pred)
+    tp, fn, fp, tn = cm.ravel()
+    return (tp + fp) / (tp + fn + fp + tn)  # Ratio of positive predictions
+
+# Calculate Disparate Impact for both age groups
+di_0_38 = disparate_impact(age_group_0_38['STP_DFR_TRGT'], model.predict(age_group_0_38.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])))
+di_above_38 = disparate_impact(age_group_above_38['STP_DFR_TRGT'], model.predict(age_group_above_38.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])))
+
+print(f'Disparate Impact (0-38): {di_0_38}')
+print(f'Disparate Impact (Above 38): {di_above_38}')
