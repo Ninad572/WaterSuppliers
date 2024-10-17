@@ -34,49 +34,59 @@ print(f'Disparate Impact (Above 38): {di_above_38}')
 
 import tensorflow as tf
 from tensorflow.keras import layers
+import numpy as np
 import xgboost as xgb
+from sklearn.model_selection import train_test_split
 
-# Adversarial Debiasing Network
+# Define the adversarial network to predict Age_grp_cd
 def build_adversarial_debiaser(input_dim):
     model = tf.keras.Sequential([
-        layers.Dense(32, activation='relu', input_shape=(input_dim,)),
-        layers.Dense(16, activation='relu'),
-        layers.Dense(1, activation='sigmoid')  # Output is binary: Age Group 0-38 or above
+        layers.Dense(64, activation='relu', input_shape=(input_dim,)),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(1, activation='sigmoid')  # Predicts Age_grp_cd (0 or 1)
     ])
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     return model
 
-# Train adversarial debiaser
-X_train = df.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])  # Exclude 'age_grp_cd'
+# Training loop for debiasing (XGB + Adversarial model)
+def adversarial_training(xgb_model, adversarial_model, X_train, y_train, y_age, epochs=10):
+    for epoch in range(epochs):
+        # Train the main model (XGBoost)
+        xgb_model.fit(X_train, y_train)
+        
+        # Get predictions (intermediate outputs) from XGBoost for adversarial model training
+        y_pred_proba = xgb_model.predict_proba(X_train)[:, 1]  # Predict probabilities for STP_DFR_TRGT
+        
+        # Train the adversarial model to predict Age_grp_cd from the predicted probabilities
+        adversarial_loss = adversarial_model.fit(y_pred_proba.reshape(-1, 1), y_age, epochs=1, batch_size=64, verbose=1)
+        
+        # Get adversarial loss (penalty) and adjust model accordingly
+        loss = adversarial_loss.history['loss'][-1]
+        print(f"Epoch {epoch+1}/{epochs}, Adversarial Loss: {loss}")
+    
+    return xgb_model
+
+# Prepare data for training
+X = df.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])
+y_train = df['STP_DFR_TRGT']
 y_age = df['Age_grp_cd']
 
-adversarial_model = build_adversarial_debiaser(X_train.shape[1])
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test, y_age_train, y_age_test = train_test_split(X, y_train, y_age, test_size=0.2, random_state=42)
 
-# Adversarial training loop to debias the main model
-def adversarial_training(model, adversarial_model, X, y, y_age, epochs=10):
-    for epoch in range(epochs):
-        # Train the main model (without using age_grp_cd)
-        model.fit(X, y)
-        
-        # Get the intermediate predictions from the main model
-        preds = model.predict_proba(X)[:, 1]
-        
-        # Train the adversarial model to detect age group from the predictions
-        adversarial_model.fit(X, y_age, epochs=1, batch_size=64)
-        
-        # Get adversarial loss and adjust main model weights to reduce age prediction ability
-        adv_loss = adversarial_model.evaluate(X, y_age, verbose=0)
-        print(f"Epoch {epoch+1}/{epochs}, Adversarial Loss: {adv_loss[0]}")
-        
-    return model
+# Initialize models
+xgb_model = xgb.XGBClassifier()
+adversarial_model = build_adversarial_debiaser(1)  # Debiasing model takes in predicted probabilities (1-dimensional)
 
-# Train model with adversarial debiasing
-adversarially_debiased_model = adversarial_training(model, adversarial_model, X_train, df['STP_DFR_TRGT'], df['Age_grp_cd'])
+# Train with adversarial debiasing
+xgb_debiased = adversarial_training(xgb_model, adversarial_model, X_train, y_train, y_age_train)
 
-# Post-training: Evaluate the debiased model
-y_pred_debiased = adversarially_debiased_model.predict(X_train)
-di_0_38_debiased = disparate_impact(age_group_0_38['STP_DFR_TRGT'], y_pred_debiased[age_group_0_38.index])
-di_above_38_debiased = disparate_impact(age_group_above_38['STP_DFR_TRGT'], y_pred_debiased[age_group_above_38.index])
+# Post-training evaluation
+y_pred_debiased = xgb_debiased.predict(X_test)
+
+# Recalculate Disparate Impact after debiasing
+di_0_38_debiased = disparate_impact(age_group_0_38['STP_DFR_TRGT'], xgb_debiased.predict(age_group_0_38.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])))
+di_above_38_debiased = disparate_impact(age_group_above_38['STP_DFR_TRGT'], xgb_debiased.predict(age_group_above_38.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID', 'Age_grp_cd'])))
 
 print(f'Post-Mitigation Disparate Impact (0-38): {di_0_38_debiased}')
 print(f'Post-Mitigation Disparate Impact (Above 38): {di_above_38_debiased}')
