@@ -38,13 +38,17 @@ y_pred = model.predict(X_test)  # y_pred should have shape (num_samples, 1)
 # Reshape y_pred to ensure it's 2D
 y_pred = y_pred.reshape(-1, 1)  # Reshape to (num_samples, 1)
 
-# Make sure df_test['AGE_GRP_CD'] exists and is correctly populated
-# Here, we assume df_test has AGE_GRP_CD after merging
-df_test = pd.merge(df_test, df_age, on='PRTCP_ID', how='left')  # Merge to get AGE_GRP_CD
+# Check df_age structure before merging
+print("df_age structure:\n", df_age.head())  # Print first few rows of df_age
+
+# Merge to get AGE_GRP_CD into df_test
+df_test = pd.merge(df_test, df_age, on='PRTCP_ID', how='left')
 
 # Ensure AGE_GRP_CD is present and matches the number of samples
 if 'AGE_GRP_CD' not in df_test.columns:
     raise ValueError("AGE_GRP_CD column is missing in df_test after merging.")
+else:
+    print("AGE_GRP_CD successfully added to df_test.")
 
 # Train the adversary using the main model's predictions and the true AGE_GRP_CD
 adversary.fit(y_pred, df_test['AGE_GRP_CD'].values, epochs=10, batch_size=32)
