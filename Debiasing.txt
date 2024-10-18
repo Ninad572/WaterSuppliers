@@ -1,157 +1,69 @@
-# Step 1: Import Libraries and Load Data
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-import xgboost as xgb
-from sklearn.metrics import accuracy_score
 import tensorflow as tf
 from tensorflow.keras import layers
+from sklearn.model_selection import train_test_split
+import pandas as pd
 
-# Load the datasets
-data = pd.read_csv('main_dataset.csv')  # original dataset with STP_DFR_TRGT and other features
-df_age = pd.read_csv('age_group_dataset.csv')  # dataset with PRTCP_ID and AGE_GRP_CD
+# Assuming the dataset has been defined and preprocessed (data, df_age, etc.)
 
-# Merge datasets on PRTCP_ID
-df = pd.merge(data, df_age, on='PRTCP_ID', how='left')
-
-# Ensure 'AGE_GRP_CD' is not used in the model
-df_no_age = df.drop(columns=['AGE_GRP_CD'])
-
-# Step 2: Preprocess the Data
-# Handle missing values by replacing with 0
+# Step 1: Preprocess the Data (as done previously)
+df_no_age = data.copy()  # Use your original dataset with necessary preprocessing
 df_no_age.fillna(0, inplace=True)
 
-# Split features (X) and target (y)
-X = df_no_age.drop(columns=['STP_DFR_TRGT'])
+PRTCP_IDs = df_no_age['PRTCP_ID']
 y = df_no_age['STP_DFR_TRGT']
-
-# One-hot encoding for categorical variables
+X = df_no_age.drop(columns=['STP_DFR_TRGT', 'PRTCP_ID'])
 X = pd.get_dummies(X)
 
-# Split data into train and test sets (80-20 split)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Split data into train and test sets
+X_train, X_test, y_train, y_test, PRTCP_ID_train, PRTCP_ID_test = train_test_split(X, y, PRTCP_IDs, test_size=0.2, random_state=42)
 
-# Step 3: Train XGBoost Model
-# Initialize XGBoost classifier
-model = xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-
-# Train the XGBoost model
-model.fit(X_train, y_train)
-
-# Predictions on the test set
-y_pred = model.predict(X_test)
-
-# Calculate accuracy
-accuracy = accuracy_score(y_test, y_pred)
-print(f'Accuracy: {accuracy}')
-
-# Step 4: Evaluate Bias (Calculate DPL and DPPL)
-# Add the AGE_GRP_CD back into the test set for bias analysis
+# Prepare the test DataFrame with predictions
 df_test = X_test.copy()
-df_test['PRTCP_ID'] = X_test.index
-df_test = pd.merge(df_test, df_age, on='PRTCP_ID', how='left')
-
-# Add predictions to the test dataset
-df_test['pred'] = y_pred
-
-# Function to calculate DPL (Difference in Positive Label rates)
-def calculate_dpl(df, target_col='STP_DFR_TRGT'):
-    return df[target_col].mean()
-
-# Function to calculate DPPL (Difference in Predicted Positive Label rates)
-def calculate_dppl(df, pred_col='pred'):
-    return df[pred_col].mean()
-
-# Calculate DPL and DPPL for AGE_GRP_CD groups
-age_group_0 = df_test[df_test['AGE_GRP_CD'] == 0]
-age_group_1 = df_test[df_test['AGE_GRP_CD'] == 1]
-age_group_2 = df_test[df_test['AGE_GRP_CD'] == 2]
-
-dpl_0 = calculate_dpl(age_group_0, target_col='STP_DFR_TRGT')
-dppl_0 = calculate_dppl(age_group_0, pred_col='pred')
-
-# Calculate DPPL - DPL for age group 0
-dppl_dpl = dppl_0 - dpl_0
-print(f'DPPL - DPL for age group 0: {dppl_dpl}')
+df_test['PRTCP_ID'] = PRTCP_ID_test.reset_index(drop=True)
 
 # Step 5: Adversarial Debiasing
 # Build the adversary model to predict AGE_GRP_CD
 adversary = tf.keras.Sequential([
-    layers.Input(shape=(1,)),  # Input is the main model's prediction
-    layers.Dense(10, activation='relu'),
-    layers.Dense(1, activation='sigmoid')  # Predicting age group (binary classification for each group)
-])
-
-# Compile the adversary with binary crossentropy loss
-adversary.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-# Train the adversary using the main model's predictions and the true AGE_GRP_CD
-adversary.fit(df_test['pred'], df_test['AGE_GRP_CD'], epochs=10, batch_size=32)
-
-# Step 6: Adjust Main Model to Fool Adversary
-# Retrain the main model to fool the adversary
-for _ in range(5):
-    # Retrain the main model on original data
-    model.fit(X_train, y_train)
-    
-    # Get predictions from the updated main model
-    y_pred = model.predict(X_test)
-    
-    # Update the adversary to continue learning from main model's predictions
-    adversary.fit(y_pred, df_test['AGE_GRP_CD'], epochs=5, batch_size=32)
-
-# Step 7: Evaluate Bias After Debiasing
-# Recalculate bias metrics after debiasing
-y_pred_debiased = model.predict(X_test)
-
-df_test['pred_debiased'] = y_pred_debiased
-dppl_debiased = calculate_dppl(age_group_0, pred_col='pred_debiased')
-dpl_debiased = calculate_dpl(age_group_0, target_col='STP_DFR_TRGT')
-
-dppl_dpl_debiased = dppl_debiased - dpl_debiased
-print(f'DPPL - DPL for age group 0 after debiasing: {dppl_dpl_debiased}')
-
-# Ensure that DPPL-DPL is between -0.5 and 0.5
-assert -0.5 <= dppl_dpl_debiased <= 0.5, "Bias is still present!"
-
-
-
-
-
-
-# Step 5: Adversarial Debiasing
-
-# Build the adversary model to predict AGE_GRP_CD
-adversary = tf.keras.Sequential([
-    layers.Input(shape=(1,)),  # Input shape should be (1,) for a single output
+    layers.Input(shape=(1,)),  # Input shape for the model's prediction
     layers.Dense(10, activation='relu'),
     layers.Dense(1, activation='sigmoid')  # Predicting age group (binary classification)
 ])
 
-# Compile the adversary with binary crossentropy loss
+# Compile the adversary
 adversary.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
+# Get predictions from the main model (make sure the model is trained before this)
+y_pred = model.predict(X_test)  # y_pred should have shape (num_samples, 1)
+
+# Reshape y_pred to ensure it's 2D
+y_pred = y_pred.reshape(-1, 1)  # Reshape to (num_samples, 1)
+
+# Make sure df_test['AGE_GRP_CD'] exists and is correctly populated
+# Here, we assume df_test has AGE_GRP_CD after merging
+df_test = pd.merge(df_test, df_age, on='PRTCP_ID', how='left')  # Merge to get AGE_GRP_CD
+
+# Ensure AGE_GRP_CD is present and matches the number of samples
+if 'AGE_GRP_CD' not in df_test.columns:
+    raise ValueError("AGE_GRP_CD column is missing in df_test after merging.")
+
 # Train the adversary using the main model's predictions and the true AGE_GRP_CD
-adversary.fit(df_test['pred'], df_test['AGE_GRP_CD'], epochs=10, batch_size=32)
+adversary.fit(y_pred, df_test['AGE_GRP_CD'].values, epochs=10, batch_size=32)
 
 # Step 6: Adjust Main Model to Fool Adversary
-# Retrain the main model to fool the adversary
 for _ in range(5):
-    # Retrain the main model on original data
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train)  # Retrain the main model
 
-    # Get predictions from the updated main model
-    y_pred = model.predict(X_test)
+    # Get updated predictions from the main model
+    y_pred = model.predict(X_test).reshape(-1, 1)  # Reshape to (num_samples, 1)
 
-    # Update the adversary to continue learning from main model's predictions
-    adversary.fit(y_pred, df_test['AGE_GRP_CD'], epochs=5, batch_size=32)
+    # Continue training the adversary with new predictions
+    adversary.fit(y_pred, df_test['AGE_GRP_CD'].values, epochs=5, batch_size=32)
 
 # Step 7: Evaluate Bias After Debiasing
-# Recalculate bias metrics after debiasing
-y_pred_debiased = model.predict(X_test)
-
-# Assuming calculate_dppl and calculate_dpl are defined functions
+y_pred_debiased = model.predict(X_test).reshape(-1, 1)  # Reshape to (num_samples, 1)
 df_test['pred_debiased'] = y_pred_debiased
+
+# Recalculate bias metrics after debiasing
 dppl_debiased = calculate_dppl(age_group=1, pred_col='pred_debiased')  # Adjust age_group as needed
 dpl_debiased = calculate_dpl(age_group=0, target_col='STP_DFR_TRGT')
 
