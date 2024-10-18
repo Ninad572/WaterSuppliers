@@ -113,3 +113,50 @@ print(f'DPPL - DPL for age group 0 after debiasing: {dppl_dpl_debiased}')
 
 # Ensure that DPPL-DPL is between -0.5 and 0.5
 assert -0.5 <= dppl_dpl_debiased <= 0.5, "Bias is still present!"
+
+
+
+
+
+
+# Step 5: Adversarial Debiasing
+
+# Build the adversary model to predict AGE_GRP_CD
+adversary = tf.keras.Sequential([
+    layers.Input(shape=(1,)),  # Input shape should be (1,) for a single output
+    layers.Dense(10, activation='relu'),
+    layers.Dense(1, activation='sigmoid')  # Predicting age group (binary classification)
+])
+
+# Compile the adversary with binary crossentropy loss
+adversary.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+# Train the adversary using the main model's predictions and the true AGE_GRP_CD
+adversary.fit(df_test['pred'], df_test['AGE_GRP_CD'], epochs=10, batch_size=32)
+
+# Step 6: Adjust Main Model to Fool Adversary
+# Retrain the main model to fool the adversary
+for _ in range(5):
+    # Retrain the main model on original data
+    model.fit(X_train, y_train)
+
+    # Get predictions from the updated main model
+    y_pred = model.predict(X_test)
+
+    # Update the adversary to continue learning from main model's predictions
+    adversary.fit(y_pred, df_test['AGE_GRP_CD'], epochs=5, batch_size=32)
+
+# Step 7: Evaluate Bias After Debiasing
+# Recalculate bias metrics after debiasing
+y_pred_debiased = model.predict(X_test)
+
+# Assuming calculate_dppl and calculate_dpl are defined functions
+df_test['pred_debiased'] = y_pred_debiased
+dppl_debiased = calculate_dppl(age_group=1, pred_col='pred_debiased')  # Adjust age_group as needed
+dpl_debiased = calculate_dpl(age_group=0, target_col='STP_DFR_TRGT')
+
+dppl_dpl_debiased = dppl_debiased - dpl_debiased
+print(f'DPPL-DPL for age group after debiasing: {dppl_dpl_debiased}')
+
+# Ensure that DPPL-DPL is between -0.5 and 0.5
+assert -0.5 < dppl_dpl_debiased < 0.5, "Bias is still present!"
