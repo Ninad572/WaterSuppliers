@@ -1,0 +1,106 @@
+import pandas as pd
+from xgboost import XGBClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import OneHotEncoder
+import numpy as np
+
+# Load the dataset
+data = pd.read_csv('your_dataset.csv')
+
+# Ensure all columns are uppercase
+data.columns = data.columns.str.upper()
+
+# Define features and target excluding AGE_GRP
+X = data[['PRTCP_ID', 'SALARY', 'WEBCODE', 'MBLCD']]
+y = data['STP_DFR_TRGT']
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Train the XGBoost classifier (Initial model with bias)
+xgb_clf = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+xgb_clf.fit(X_train, y_train)
+
+# Get predictions and calculate AUC
+y_pred_xgb = xgb_clf.predict(X_test)
+auc_xgb = roc_auc_score(y_test, y_pred_xgb)
+print(f'Initial XGBoost AUC: {auc_xgb}')
+
+# Now apply adversarial debiasing without reweighting
+
+# Train the adversary model to predict AGE_GRP from the XGBoost predictions
+# One-hot encode AGE_GRP
+age_grp = data['AGE_GRP'].values.reshape(-1, 1)
+enc = OneHotEncoder(sparse=False)
+age_grp_encoded = enc.fit_transform(age_grp)
+
+# Train on predictions of the XGBoost model (adversary input is XGBoost predictions)
+adversary_input_train = xgb_clf.predict_proba(X_train)[:, 1].reshape(-1, 1)
+adversary_input_test = xgb_clf.predict_proba(X_test)[:, 1].reshape(-1, 1)
+
+adversary = MLPClassifier(hidden_layer_sizes=(16,), max_iter=500, random_state=42)
+adversary.fit(adversary_input_train, age_grp_encoded[:len(X_train)])
+
+# Get the adversary's predictions (used to adjust main model predictions)
+adversary_preds = adversary.predict_proba(adversary_input_train)
+
+# Adjust XGBoost predictions to reduce the influence of AGE_GRP
+def adjust_predictions(xgb_preds, adv_preds, alpha=0.1):
+    return xgb_preds - alpha * adv_preds
+
+# Get adjusted predictions
+adjusted_preds_train = adjust_predictions(xgb_clf.predict_proba(X_train)[:, 1], adversary_preds)
+
+# Train a new XGBoost model on these adjusted predictions
+xgb_clf_debiased = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+xgb_clf_debiased.fit(X_train, y_train, sample_weight=adjusted_preds_train)
+
+# Test the debiased model
+y_pred_debiased = xgb_clf_debiased.predict(X_test)
+auc_debiased = roc_auc_score(y_test, y_pred_debiased)
+print(f'Debiased XGBoost AUC: {auc_debiased}')
+
+# Check for Bias Reduction for 3 Groups
+
+def calculate_dpl(y_true, y_pred, sensitive_attr):
+    """Calculate Demographic Parity Loss (DPL) across three sensitive groups."""
+    group_0 = (sensitive_attr == 0)
+    group_1 = (sensitive_attr == 1)
+    group_2 = (sensitive_attr == 2)
+    
+    p_y1_group_0 = np.mean(y_pred[group_0])
+    p_y1_group_1 = np.mean(y_pred[group_1])
+    p_y1_group_2 = np.mean(y_pred[group_2])
+    
+    # Calculate DPL as the range between max and min of the probabilities
+    dpl = max(p_y1_group_0, p_y1_group_1, p_y1_group_2) - min(p_y1_group_0, p_y1_group_1, p_y1_group_2)
+    return dpl
+
+def calculate_dppl(y_true, y_pred, sensitive_attr):
+    """Calculate Disparate Impact (DPPL) across three sensitive groups."""
+    group_0 = (sensitive_attr == 0)
+    group_1 = (sensitive_attr == 1)
+    group_2 = (sensitive_attr == 2)
+    
+    p_y1_group_0 = np.mean(y_pred[group_0])
+    p_y1_group_1 = np.mean(y_pred[group_1])
+    p_y1_group_2 = np.mean(y_pred[group_2])
+    
+    # Calculate DPPL as the ratio of the max to min probabilities (avoiding division by zero)
+    dppl = max(p_y1_group_0, p_y1_group_1, p_y1_group_2) / (min(p_y1_group_0, p_y1_group_1, p_y1_group_2) + 1e-10)
+    return dppl
+
+# Calculate DPL and DPPL before debiasing
+age_grp_test = data['AGE_GRP'][X_test.index].values
+dpl_before = calculate_dpl(y_test, y_pred_xgb, age_grp_test)
+dppl_before = calculate_dppl(y_test, y_pred_xgb, age_grp_test)
+
+print(f'Before Debiasing - DPL: {dpl_before}, DPPL: {dppl_before}')
+
+# Calculate DPL and DPPL after debiasing
+dpl_after = calculate_dpl(y_test, y_pred_debiased, age_grp_test)
+dppl_after = calculate_dppl(y_test, y_pred_debiased, age_grp_test)
+
+print(f'After Debiasing - DPL: {dpl_after}, DPPL: {dppl_after}')
