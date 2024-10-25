@@ -1,0 +1,34 @@
+While it's possible to use an XGBClassifier as the adversarial model in adversarial debiasing, an MLP Classifier is generally preferred because it provides certain advantages that are crucial for the debiasing process. Here’s why:
+
+1. Gradient-Based Training Compatibility
+
+MLP Classifiers are neural networks trained using backpropagation, making them well-suited for gradient-based optimization. This aligns well with adversarial training, where the primary model and adversarial model need to interact and update weights iteratively based on gradients.
+
+XGBClassifier, however, is built using tree-based boosting and doesn’t rely on backpropagation or gradients in the same way. The sequential nature of boosting (adding trees one at a time) and discrete splits in decision trees make it less compatible with the simultaneous, gradient-based optimization used in adversarial training.
+
+
+2. Smoothness in Learning
+
+MLP Classifiers produce smoother decision boundaries, which helps in identifying and penalizing biased patterns more gradually.
+
+XGBClassifier uses trees, which create stepwise, discontinuous decision boundaries. This rigidity can make it harder for the adversarial model to smoothly learn and generalize the patterns of bias, potentially leading to overfitting or noisy penalties that are less effective for debiasing.
+
+
+3. Flexibility with Non-Linear Bias Patterns
+
+An MLP can better capture complex, non-linear relationships due to its deep layers and non-linear activation functions. This allows it to learn subtle biases that might be encoded indirectly in the primary model’s predictions.
+
+XGBClassifier, though good with non-linearities, is less flexible in capturing bias patterns that don’t follow tree-structured rules or that are distributed more continuously across features.
+
+
+4. Interpretability of Bias Signals
+
+With an MLP Classifier, it’s easier to understand and tune the adversarial model to focus on specific aspects of bias, thanks to its continuous optimization process.
+
+XGBoost’s tree-based splits are less interpretable in this context, making it harder to control exactly how the adversarial model is penalizing bias, which can reduce the effectiveness of the debiasing.
+
+
+Summary
+
+While technically possible, using an XGBClassifier as an adversarial model would reduce the effectiveness of the debiasing process. The MLP’s compatibility with gradient-based optimization, ability to capture smooth bias patterns, and greater flexibility with non-linear relationships make it a better choice for adversarial debiasing.
+
