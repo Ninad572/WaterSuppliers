@@ -1,11 +1,15 @@
-lHere's a concise, professional summary:
-
-Adversarial debiasing with MLPClassifier reduced model bias by 15-20%, at a cost of 10-15% accuracy loss.
-
-Higher alpha values improve fairness but reduce accuracy, while lower values improve accuracy at the expense of fairness.
-
-Increasing neuron count results in overfitting and prolonged training.
-
-Binary (1/0) encoding increases adversary accuracy, whereas separate encoding reduces it.
-
-
+data result;
+    set your_table_name;
+    
+    if CNTR_TENURE >= 0 and CNTR_TENURE <= 100 then CNTR_TENURE_BIN = '0-100';
+    else if CNTR_TENURE > 100 and CNTR_TENURE <= 200 then CNTR_TENURE_BIN = '101-200';
+    else if CNTR_TENURE > 200 and CNTR_TENURE <= 300 then CNTR_TENURE_BIN = '201-300';
+    else if CNTR_TENURE > 300 and CNTR_TENURE <= 400 then CNTR_TENURE_BIN = '301-400';
+    else if CNTR_TENURE > 400 and CNTR_TENURE <= 500 then CNTR_TENURE_BIN = '401-500';
+    else if CNTR_TENURE > 500 and CNTR_TENURE <= 600 then CNTR_TENURE_BIN = '501-600';
+    else if CNTR_TENURE > 600 and CNTR_TENURE <= 700 then CNTR_TENURE_BIN = '601-700';
+    else if CNTR_TENURE > 700 and CNTR_TENURE <= 800 then CNTR_TENURE_BIN = '701-800';
+    else if CNTR_TENURE > 800 and CNTR_TENURE <= 900 then CNTR_TENURE_BIN = '801-900';
+    else if CNTR_TENURE > 900 and CNTR_TENURE <= 1000 then CNTR_TENURE_BIN = '901-1000';
+    else CNTR_TENURE_BIN = 'Out of range';  /* Optional, for values outside of 0-1000 */
+run;
