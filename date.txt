@@ -1,28 +1,26 @@
-proc sql;
-    /* Create a temporary table with row numbers by asset group */
-    create table temp as 
-    select *, 
-           monotonic() as row_num 
-    from (select * from your_table order by asset_group, days);
-
-    /* Count total rows per asset group */
-    create table counts as 
-    select asset_group, count(*) as total_rows 
-    from your_table 
-    group by asset_group;
-quit;
-
-data temp2;
-    merge temp counts;
-    by asset_group;
-    lower_bound = ceil(total_rows * 0.1);
-    upper_bound = floor(total_rows * 0.9);
+/* Step 1: Sort the data by asset_grp and days_qt_sld */
+proc sort data=d7;
+   by asset_grp days_qt_sld;
 run;
 
+/* Step 2: Use PROC RANK to assign a percentile rank within each asset_grp */
+/* The GROUPS=100 option creates a rank variable (0–99) */
+proc rank data=d7 groups=100 out=ranked;
+   by asset_grp;
+   var days_qt_sld;
+   ranks day_percentile;
+run;
+
+/* Step 3: Filter to keep only the middle 80% (exclude bottom 10% and top 10%) */
+data middle80;
+   set ranked;
+   if day_percentile >= 10 and day_percentile < 90;
+run;
+
+/* Step 4: Calculate the mean of days_qt_sld for each asset_grp from the middle 80% data */
 proc sql;
-    /* Calculate the middle 80% average per asset group */
-    select asset_group, mean(days) as middle_80_avg
-    from temp2
-    where row_num > lower_bound and row_num <= upper_bound
-    group by asset_group;
+   create table middle80_avg as
+   select asset_grp, mean(days_qt_sld) as middle80_avg
+   from middle80
+   group by asset_grp;
 quit;
