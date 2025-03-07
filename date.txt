@@ -1,114 +1,28 @@
-data new_data;
-    set old_data;
+proc sql;
+    /* Create a temporary table with row numbers by asset group */
+    create table temp as 
+    select *, 
+           monotonic() as row_num 
+    from (select * from your_table order by asset_group, days);
 
-    if opty_efctv_dt >= sold_dt >= frst_qt_dt >= cls_dt >= cmt_dt then code = 1;
-    if opty_efctv_dt >= sold_dt >= frst_qt_dt >= cmt_dt >= cls_dt then code = 2;
-    if opty_efctv_dt >= sold_dt >= cls_dt >= frst_qt_dt >= cmt_dt then code = 3;
-    if opty_efctv_dt >= sold_dt >= cls_dt >= cmt_dt >= frst_qt_dt then code = 4;
-    if opty_efctv_dt >= sold_dt >= cmt_dt >= frst_qt_dt >= cls_dt then code = 5;
-    if opty_efctv_dt >= sold_dt >= cmt_dt >= cls_dt >= frst_qt_dt then code = 6;
-    if opty_efctv_dt >= frst_qt_dt >= sold_dt >= cls_dt >= cmt_dt then code = 7;
-    if opty_efctv_dt >= frst_qt_dt >= sold_dt >= cmt_dt >= cls_dt then code = 8;
-    if opty_efctv_dt >= frst_qt_dt >= cls_dt >= sold_dt >= cmt_dt then code = 9;
-    if opty_efctv_dt >= frst_qt_dt >= cls_dt >= cmt_dt >= sold_dt then code = 10;
-    if opty_efctv_dt >= frst_qt_dt >= cmt_dt >= sold_dt >= cls_dt then code = 11;
-    if opty_efctv_dt >= frst_qt_dt >= cmt_dt >= cls_dt >= sold_dt then code = 12;
-    if opty_efctv_dt >= cls_dt >= sold_dt >= frst_qt_dt >= cmt_dt then code = 13;
-    if opty_efctv_dt >= cls_dt >= sold_dt >= cmt_dt >= frst_qt_dt then code = 14;
-    if opty_efctv_dt >= cls_dt >= frst_qt_dt >= sold_dt >= cmt_dt then code = 15;
-    if opty_efctv_dt >= cls_dt >= frst_qt_dt >= cmt_dt >= sold_dt then code = 16;
-    if opty_efctv_dt >= cls_dt >= cmt_dt >= sold_dt >= frst_qt_dt then code = 17;
-    if opty_efctv_dt >= cls_dt >= cmt_dt >= frst_qt_dt >= sold_dt then code = 18;
-    if opty_efctv_dt >= cmt_dt >= sold_dt >= frst_qt_dt >= cls_dt then code = 19;
-    if opty_efctv_dt >= cmt_dt >= sold_dt >= cls_dt >= frst_qt_dt then code = 20;
-    if opty_efctv_dt >= cmt_dt >= frst_qt_dt >= sold_dt >= cls_dt then code = 21;
-    if opty_efctv_dt >= cmt_dt >= frst_qt_dt >= cls_dt >= sold_dt then code = 22;
-    if opty_efctv_dt >= cmt_dt >= cls_dt >= sold_dt >= frst_qt_dt then code = 23;
-    if opty_efctv_dt >= cmt_dt >= cls_dt >= frst_qt_dt >= sold_dt then code = 24;
+    /* Count total rows per asset group */
+    create table counts as 
+    select asset_group, count(*) as total_rows 
+    from your_table 
+    group by asset_group;
+quit;
 
-    if sold_dt >= opty_efctv_dt >= frst_qt_dt >= cls_dt >= cmt_dt then code = 25;
-    if sold_dt >= opty_efctv_dt >= frst_qt_dt >= cmt_dt >= cls_dt then code = 26;
-    if sold_dt >= opty_efctv_dt >= cls_dt >= frst_qt_dt >= cmt_dt then code = 27;
-    if sold_dt >= opty_efctv_dt >= cls_dt >= cmt_dt >= frst_qt_dt then code = 28;
-    if sold_dt >= opty_efctv_dt >= cmt_dt >= frst_qt_dt >= cls_dt then code = 29;
-    if sold_dt >= opty_efctv_dt >= cmt_dt >= cls_dt >= frst_qt_dt then code = 30;
-    if sold_dt >= frst_qt_dt >= opty_efctv_dt >= cls_dt >= cmt_dt then code = 31;
-    if sold_dt >= frst_qt_dt >= opty_efctv_dt >= cmt_dt >= cls_dt then code = 32;
-    if sold_dt >= frst_qt_dt >= cls_dt >= opty_efctv_dt >= cmt_dt then code = 33;
-    if sold_dt >= frst_qt_dt >= cls_dt >= cmt_dt >= opty_efctv_dt then code = 34;
-    if sold_dt >= frst_qt_dt >= cmt_dt >= opty_efctv_dt >= cls_dt then code = 35;
-    if sold_dt >= frst_qt_dt >= cmt_dt >= cls_dt >= opty_efctv_dt then code = 36;
-    if sold_dt >= cls_dt >= opty_efctv_dt >= frst_qt_dt >= cmt_dt then code = 37;
-    if sold_dt >= cls_dt >= opty_efctv_dt >= cmt_dt >= frst_qt_dt then code = 38;
-    if sold_dt >= cls_dt >= frst_qt_dt >= opty_efctv_dt >= cmt_dt then code = 39;
-    if sold_dt >= cls_dt >= frst_qt_dt >= cmt_dt >= opty_efctv_dt then code = 40;
-    if sold_dt >= cls_dt >= cmt_dt >= opty_efctv_dt >= frst_qt_dt then code = 41;
-    if sold_dt >= cls_dt >= cmt_dt >= frst_qt_dt >= opty_efctv_dt then code = 42;
-if sold_dt >= cmt_dt >= opty_efctv_dt >= frst_qt_dt >= cls_dt then code = 43;
-    if sold_dt >= cmt_dt >= opty_efctv_dt >= cls_dt >= frst_qt_dt then code = 44;
-    if sold_dt >= cmt_dt >= frst_qt_dt >= opty_efctv_dt >= cls_dt then code = 45;
-    if sold_dt >= cmt_dt >= frst_qt_dt >= cls_dt >= opty_efctv_dt then code = 46;
-    if sold_dt >= cmt_dt >= cls_dt >= opty_efctv_dt >= frst_qt_dt then code = 47;
-    if sold_dt >= cmt_dt >= cls_dt >= frst_qt_dt >= opty_efctv_dt then code = 48;
-    if frst_qt_dt >= opty_efctv_dt >= sold_dt >= cls_dt >= cmt_dt then code = 49;
-    if frst_qt_dt >= opty_efctv_dt >= sold_dt >= cmt_dt >= cls_dt then code = 50;
-    if frst_qt_dt >= opty_efctv_dt >= cls_dt >= sold_dt >= cmt_dt then code = 51;
-    if frst_qt_dt >= opty_efctv_dt >= cls_dt >= cmt_dt >= sold_dt then code = 52;
-    if frst_qt_dt >= opty_efctv_dt >= cmt_dt >= sold_dt >= cls_dt then code = 53;
-    if frst_qt_dt >= opty_efctv_dt >= cmt_dt >= cls_dt >= sold_dt then code = 54;
-    if frst_qt_dt >= sold_dt >= opty_efctv_dt >= cls_dt >= cmt_dt then code = 55;
-    if frst_qt_dt >= sold_dt >= opty_efctv_dt >= cmt_dt >= cls_dt then code = 56;
-    if frst_qt_dt >= sold_dt >= cls_dt >= opty_efctv_dt >= cmt_dt then code = 57;
-    if frst_qt_dt >= sold_dt >= cls_dt >= cmt_dt >= opty_efctv_dt then code = 58;
-    if frst_qt_dt >= sold_dt >= cmt_dt >= opty_efctv_dt >= cls_dt then code = 59;
-    if frst_qt_dt >= sold_dt >= cmt_dt >= cls_dt >= opty_efctv_dt then code = 60;
-    if frst_qt_dt >= cls_dt >= opty_efctv_dt >= sold_dt >= cmt_dt then code = 61;
-    if frst_qt_dt >= cls_dt >= opty_efctv_dt >= cmt_dt >= sold_dt then code = 62;
-    if frst_qt_dt >= cls_dt >= sold_dt >= opty_efctv_dt >= cmt_dt then code = 63;
-    if frst_qt_dt >= cls_dt >= sold_dt >= cmt_dt >= opty_efctv_dt then code = 64;
-    if frst_qt_dt >= cls_dt >= cmt_dt >= opty_efctv_dt >= sold_dt then code = 65;
-    if frst_qt_dt >= cls_dt >= cmt_dt >= sold_dt >= opty_efctv_dt then code = 66;
-    if frst_qt_dt >= cmt_dt >= opty_efctv_dt >= sold_dt >= cls_dt then code = 67;
-    if frst_qt_dt >= cmt_dt >= opty_efctv_dt >= cls_dt >= sold_dt then code = 68;
-    if frst_qt_dt >= cmt_dt >= sold_dt >= opty_efctv_dt >= cls_dt then code = 69;
-    if frst_qt_dt >= cmt_dt >= sold_dt >= cls_dt >= opty_efctv_dt then code = 70;
-    if frst_qt_dt >= cmt_dt >= cls_dt >= opty_efctv_dt >= sold_dt then code = 71;
-    if frst_qt_dt >= cmt_dt >= cls_dt >= sold_dt >= opty_efctv_dt then code = 72;
-    if cls_dt >= opty_efctv_dt >= sold_dt >= frst_qt_dt >= cmt_dt then code = 73;
-    if cls_dt >= opty_efctv_dt >= sold_dt >= cmt_dt >= frst_qt_dt then code = 74;
-    if cls_dt >= opty_efctv_dt >= frst_qt_dt >= sold_dt >= cmt_dt then code = 75;
-    if cls_dt >= opty_efctv_dt >= frst_qt_dt >= cmt_dt >= sold_dt then code = 76;
-    if cls_dt >= opty_efctv_dt >= cmt_dt >= sold_dt >= frst_qt_dt then code = 77;
-    if cls_dt >= opty_efctv_dt >= cmt_dt >= frst_qt_dt >= sold_dt then code = 78;
-    if cls_dt >= sold_dt >= opty_efctv_dt >= frst_qt_dt >= cmt_dt then code = 79;
-    if cls_dt >= sold_dt >= opty_efctv_dt >= cmt_dt >= frst_qt_dt then code = 80;
-    if cls_dt >= sold_dt >= frst_qt_dt >= opty_efctv_dt >= cmt_dt then code = 81;
-    if cls_dt >= sold_dt >= frst_qt_dt >= cmt_dt >= opty_efctv_dt then code = 82;
-    if cls_dt >= sold_dt >= cmt_dt >= opty_efctv_dt >= frst_qt_dt then code = 83;
-    if cls_dt >= sold_dt >= cmt_dt >= frst_qt_dt >= opty_efctv_dt then code = 84;
-    if cls_dt >= frst_qt_dt >= opty_efctv_dt >= sold_dt >= cmt_dt then code = 85;
-    if cls_dt >= frst_qt_dt >= opty_efctv_dt >= cmt_dt >= sold_dt then code = 86;
-    if cls_dt >= frst_qt_dt >= sold_dt >= opty_efctv_dt >= cmt_dt then code = 87;
-    if cls_dt >= frst_qt_dt >= sold_dt >= cmt_dt >= opty_efctv_dt then code = 88;
-    if cls_dt >= frst_qt_dt >= cmt_dt >= opty_efctv_dt >= sold_dt then code = 89;
-    if cls_dt >= frst_qt_dt >= cmt_dt >= sold_dt >= opty_efctv_dt then code = 90;
-    if cls_dt >= cmt_dt >= opty_efctv_dt >= sold_dt >= frst_qt_dt then code = 91;
-    if cls_dt >= cmt_dt >= opty_efctv_dt >= frst_qt_dt >= sold_dt then code = 92;
-    if cls_dt >= cmt_dt >= sold_dt >= opty_efctv_dt >= frst_qt_dt then code = 93;
-    if cls_dt >= cmt_dt >= sold_dt >= frst_qt_dt >= opty_efctv_dt then code = 94;
-    if cls_dt >= cmt_dt >= frst_qt_dt >= opty_efctv_dt >= sold_dt then code = 95;
-    if cls_dt >= cmt_dt >= frst_qt_dt >= sold_dt >= opty_efctv_dt then code = 96;
-    if cmt_dt >= cls_dt >= frst_qt_dt >= sold_dt >= opty_efctv_dt then code = 97;
-    if cmt_dt >= cls_dt >= frst_qt_dt >= opty_efctv_dt >= sold_dt then code = 98;
-    if cmt_dt >= cls_dt >= sold_dt >= frst_qt_dt >= opty_efctv_dt then code = 99;
-    if cmt_dt >= cls_dt >= sold_dt >= opty_efctv_dt >= frst_qt_dt then code = 100;
-if cmt_dt >= frst_qt_dt >= opty_efctv_dt >= cls_dt >= sold_dt then code = 111;
-    if cmt_dt >= frst_qt_dt >= opty_efctv_dt >= sold_dt >= cls_dt then code = 112;
-    if cmt_dt >= frst_qt_dt >= cls_dt >= opty_efctv_dt >= sold_dt then code = 113;
-    if cmt_dt >= frst_qt_dt >= cls_dt >= sold_dt >= opty_efctv_dt then code = 114;
-    if cmt_dt >= opty_efctv_dt >= sold_dt >= frst_qt_dt >= cls_dt then code = 115;
-    if cmt_dt >= opty_efctv_dt >= sold_dt >= cls_dt >= frst_qt_dt then code = 116;
-    if cmt_dt >= opty_efctv_dt >= frst_qt_dt >= sold_dt >= cls_dt then code = 117;
-    if cmt_dt >= opty_efctv_dt >= frst_qt_dt >= cls_dt >= sold_dt then code = 118;
-    if cmt_dt >= opty_efctv_dt >= cls_dt >= sold_dt >= frst_qt_dt then code = 119;
-    if cmt_dt >= opty_efctv_dt >= cls_dt >= frst_qt_dt >= sold_dt then code = 120;
+data temp2;
+    merge temp counts;
+    by asset_group;
+    lower_bound = ceil(total_rows * 0.1);
+    upper_bound = floor(total_rows * 0.9);
+run;
+
+proc sql;
+    /* Calculate the middle 80% average per asset group */
+    select asset_group, mean(days) as middle_80_avg
+    from temp2
+    where row_num > lower_bound and row_num <= upper_bound
+    group by asset_group;
+quit;
