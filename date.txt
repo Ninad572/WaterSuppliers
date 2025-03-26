@@ -1,26 +1,25 @@
-/* Step 1: Sort the data by asset_grp and days_qt_sld */
-proc sort data=d7;
-   by asset_grp days_qt_sld;
-run;
-
-/* Step 2: Use PROC RANK to assign a percentile rank within each asset_grp */
-/* The GROUPS=100 option creates a rank variable (0–99) */
-proc rank data=d7 groups=100 out=ranked;
-   by asset_grp;
-   var days_qt_sld;
-   ranks day_percentile;
-run;
-
-/* Step 3: Filter to keep only the middle 80% (exclude bottom 10% and top 10%) */
-data middle80;
-   set ranked;
-   if day_percentile >= 10 and day_percentile < 90;
-run;
-
-/* Step 4: Calculate the mean of days_qt_sld for each asset_grp from the middle 80% data */
 proc sql;
-   create table middle80_avg as
-   select asset_grp, mean(days_qt_sld) as middle80_avg
-   from middle80
-   group by asset_grp;
+  create table odm_c5 as
+  select a.cntr_mbr_id, 
+         a.mo_end_dt,
+         a.ldp as def1,
+         b.ldp as def2,
+         c.ldp as def3,
+         case 
+           when a.ldp <= b.ldp and 
+                b.ldp <= c.ldp and 
+                a.ldp < c.ldp 
+                then 1
+           when a.ldp >= b.ldp and 
+                b.ldp >= c.ldp and 
+                a.ldp > c.ldp 
+                then -1
+           else .
+         end as target
+  from odm_c4 as a
+    left join odm_c4 as b 
+      on a.cntr_mbr_id = b.cntr_mbr_id and b.mo_end_dt = a.mo_end_dt + 1
+    left join odm_c4 as c 
+      on a.cntr_mbr_id = c.cntr_mbr_id and c.mo_end_dt = a.mo_end_dt + 2
+  order by a.cntr_mbr_id, a.mo_end_dt;
 quit;
