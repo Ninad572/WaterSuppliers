@@ -1,44 +1,23 @@
-/* Assume ODM_C4 is sorted by CNTR_MBR_ID and MO_END_DT */
-proc sort data=odm_c4;
-   by cntr_mbr_id mo_end_dt;
+/* Create sequential order variable within each CNTR_MBR_ID */
+data odm_c4_seq;
+  set odm_c4;
+  by cntr_mbr_id;
+  if first.cntr_mbr_id then seq = 0;
+  seq + 1;
 run;
 
-data odm_c5;
-   set odm_c4 nobs=nobs;
-   by cntr_mbr_id;
-   /* Initialize target as missing */
-   target = .;
-   /* Only if there are at least 3 future observations AND 
-      they belong to the same employee, then evaluate */
-   array next_val[3];
-   do i = 1 to 3;
-      if (_n_ + i) <= nobs then do;
-         /* Read the _n_+i observation from ODM_C4 */
-         set odm_c4 point=_n_+i nobs=nobs2;
-         /* Check that the employee id is the same */
-         if cntr_mbr_id = odm_c4.cntr_mbr_id then 
-            next_val[i] = ldp;
-         else 
-            next_val[i] = .;
-      end;
-      else next_val[i] = .;
-   end;
-   /* Only evaluate if all three future deferral values are nonmissing */
-   if n(of next_val[*]) = 3 then do;
-      /* Check for increasing/non-decreasing pattern:
-         First next value > current and then next values never drop */
-      if ( next_val[1] > ldp and
-           next_val[2] >= next_val[1] and
-           next_val[3] >= next_val[2] ) then target = 1;
-      /* Check for decreasing/non-increasing pattern */
-      else if ( next_val[1] < ldp and
-                next_val[2] <= next_val[1] and
-                next_val[3] <= next_val[2] ) then target = -1;
-      else target = 0;
-   end;
-   else target = .;
-   drop i;
-   output;
-   /* Ensure proper termination of the data step */
-   if _n_ = nobs then stop;
-run;
+/* Use PROC SQL to self-join and retrieve next 3 LDP values */
+proc sql;
+  create table odm_c5 as
+  select a.cntr_mbr_id, 
+         a.mo_end_dt, 
+         a.ldp,
+         b.ldp as c1,
+         c.ldp as c2,
+         d.ldp as c3
+  from odm_c4_seq as a
+  left join odm_c4_seq as b on a.cntr_mbr_id = b.cntr_mbr_id and b.seq = a.seq + 1
+  left join odm_c4_seq as c on a.cntr_mbr_id = c.cntr_mbr_id and c.seq = a.seq + 2
+  left join odm_c4_seq as d on a.cntr_mbr_id = d.cntr_mbr_id and d.seq = a.seq + 3
+  order by a.cntr_mbr_id, a.seq;
+quit;
