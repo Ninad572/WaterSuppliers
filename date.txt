@@ -1,25 +1,44 @@
-proc sql;
-  create table odm_c5 as
-  select a.cntr_mbr_id, 
-         a.mo_end_dt,
-         a.ldp as def1,
-         b.ldp as def2,
-         c.ldp as def3,
-         case 
-           when a.ldp <= b.ldp and 
-                b.ldp <= c.ldp and 
-                a.ldp < c.ldp 
-                then 1
-           when a.ldp >= b.ldp and 
-                b.ldp >= c.ldp and 
-                a.ldp > c.ldp 
-                then -1
-           else .
-         end as target
-  from odm_c4 as a
-    left join odm_c4 as b 
-      on a.cntr_mbr_id = b.cntr_mbr_id and b.mo_end_dt = a.mo_end_dt + 1
-    left join odm_c4 as c 
-      on a.cntr_mbr_id = c.cntr_mbr_id and c.mo_end_dt = a.mo_end_dt + 2
-  order by a.cntr_mbr_id, a.mo_end_dt;
-quit;
+/* Assume ODM_C4 is sorted by CNTR_MBR_ID and MO_END_DT */
+proc sort data=odm_c4;
+   by cntr_mbr_id mo_end_dt;
+run;
+
+data odm_c5;
+   set odm_c4 nobs=nobs;
+   by cntr_mbr_id;
+   /* Initialize target as missing */
+   target = .;
+   /* Only if there are at least 3 future observations AND 
+      they belong to the same employee, then evaluate */
+   array next_val[3];
+   do i = 1 to 3;
+      if (_n_ + i) <= nobs then do;
+         /* Read the _n_+i observation from ODM_C4 */
+         set odm_c4 point=_n_+i nobs=nobs2;
+         /* Check that the employee id is the same */
+         if cntr_mbr_id = odm_c4.cntr_mbr_id then 
+            next_val[i] = ldp;
+         else 
+            next_val[i] = .;
+      end;
+      else next_val[i] = .;
+   end;
+   /* Only evaluate if all three future deferral values are nonmissing */
+   if n(of next_val[*]) = 3 then do;
+      /* Check for increasing/non-decreasing pattern:
+         First next value > current and then next values never drop */
+      if ( next_val[1] > ldp and
+           next_val[2] >= next_val[1] and
+           next_val[3] >= next_val[2] ) then target = 1;
+      /* Check for decreasing/non-increasing pattern */
+      else if ( next_val[1] < ldp and
+                next_val[2] <= next_val[1] and
+                next_val[3] <= next_val[2] ) then target = -1;
+      else target = 0;
+   end;
+   else target = .;
+   drop i;
+   output;
+   /* Ensure proper termination of the data step */
+   if _n_ = nobs then stop;
+run;
