@@ -1,3 +1,25 @@
+proc sort data=odm_c4;
+   by cntr_mbr_id mo_end_dt;
+run;
+
+data odm_c5;
+   set odm_c4;
+   by cntr_mbr_id;
+
+   /* Get the previous month's deferral percentage sum */
+   prev_ldp = lag(ldp);
+
+   /* Reset prev_ldp for each new employee */
+   if first.cntr_mbr_id then prev_ldp = .;
+
+   /* Flag = 1 if there's a change, else 0 */
+   if prev_ldp ne . and ldp ne prev_ldp then change_flag = 1;
+   else change_flag = 0;
+run;
+
+
+
+
 /* Create sequential order variable within each CNTR_MBR_ID */
 data odm_c4_seq;
   set odm_c4;
