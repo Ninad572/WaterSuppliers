@@ -43,3 +43,12 @@ proc sql;
   left join odm_c4_seq as d on a.cntr_mbr_id = d.cntr_mbr_id and d.seq = a.seq + 3
   order by a.cntr_mbr_id, a.seq;
 quit;
+
+
+
+if change_flag = 1 then do;
+      if c1 >= ldp and c2 >= c1 and c3 >= c2 then target = 1; /* Non-decreasing */
+      else if c1 <= ldp and c2 <= c1 and c3 <= c2 then target = -1; /* Non-increasing */
+      else target = 0; /* Mixed trend */
+   end;
+   else target = 0; /* No change */
