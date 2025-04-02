@@ -1,54 +1,27 @@
-proc sort data=odm_c4;
-   by cntr_mbr_id mo_end_dt;
-run;
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-data odm_c5;
-   set odm_c4;
-   by cntr_mbr_id;
+cm = confusion_matrix(y_test, y_pred)
 
-   /* Get the previous month's deferral percentage sum */
-   prev_ldp = lag(ldp);
+plt.figure(figsize=(6,6))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=[0,1,2], yticklabels=[0,1,2])
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.title("Confusion Matrix")
+plt.show()
 
-   /* Reset prev_ldp for each new employee */
-   if first.cntr_mbr_id then prev_ldp = .;
+from sklearn.metrics import classification_report
 
-   /* Flag = 1 if there's a change, else 0 */
-   if prev_ldp ne . and ldp ne prev_ldp then change_flag = 1;
-   else change_flag = 0;
-run;
+print(classification_report(y_test, y_pred, digits=4))
 
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import label_binarize
 
+y_test_bin = label_binarize(y_test, classes=[0, 1, 2])
+y_prob = model.predict_proba(X_test)
 
-
-/* Create sequential order variable within each CNTR_MBR_ID */
-data odm_c4_seq;
-  set odm_c4;
-  by cntr_mbr_id;
-  if first.cntr_mbr_id then seq = 0;
-  seq + 1;
-run;
-
-/* Use PROC SQL to self-join and retrieve next 3 LDP values */
-proc sql;
-  create table odm_c5 as
-  select a.cntr_mbr_id, 
-         a.mo_end_dt, 
-         a.ldp,
-         b.ldp as c1,
-         c.ldp as c2,
-         d.ldp as c3
-  from odm_c4_seq as a
-  left join odm_c4_seq as b on a.cntr_mbr_id = b.cntr_mbr_id and b.seq = a.seq + 1
-  left join odm_c4_seq as c on a.cntr_mbr_id = c.cntr_mbr_id and c.seq = a.seq + 2
-  left join odm_c4_seq as d on a.cntr_mbr_id = d.cntr_mbr_id and d.seq = a.seq + 3
-  order by a.cntr_mbr_id, a.seq;
-quit;
+auc = roc_auc_score(y_test_bin, y_prob, average="weighted", multi_class="ovr")
+print(f"ROC-AUC Score: {auc:.4f}")
 
 
-
-if change_flag = 1 then do;
-      if c1 >= ldp and c2 >= c1 and c3 >= c2 then target = 1; /* Non-decreasing */
-      else if c1 <= ldp and c2 <= c1 and c3 <= c2 then target = -1; /* Non-increasing */
-      else target = 0; /* Mixed trend */
-   end;
-   else target = 0; /* No change */
