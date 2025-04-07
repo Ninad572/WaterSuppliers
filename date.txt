@@ -27,7 +27,6 @@ for col in cat_vars:
     total_counts = data1.groupby(col)['eid_pid'].count().rename('total')
     
     # Calculate the counts for each target value within each group.
-    # This produces a table with target values as columns.
     target_counts = data1.groupby([col, target_col])['eid_pid'].count().unstack(fill_value=0)
     
     # Combine the aggregated results
@@ -45,14 +44,17 @@ for col in cat_vars:
     colors = {-1: 'red', 0: 'green', 1: 'blue'}
     
     # Overlay line charts for each target level (secondary y-axis)
+    # Here, we compute the proportion of each target in that group.
     for target_value, color in colors.items():
         if target_value in aggregated.columns:
-            ax2.plot(aggregated[col], aggregated[target_value], marker='o', color=color, label=f"Target {target_value}")
+            # Calculate the proportion for the target level.
+            proportion = aggregated[target_value] / aggregated['total']
+            ax2.plot(aggregated[col], proportion, marker='o', color=color, label=f"Proportion Target {target_value}")
     
     # Set labels and title
     ax1.set_xlabel(col)
     ax1.set_ylabel('Total Count')
-    ax2.set_ylabel('Target Count')
+    ax2.set_ylabel('Proportion of Target')
     ax1.set_title(f"Distribution for {col}")
     
     # Combine legends from both axes
