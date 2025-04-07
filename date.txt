@@ -5,63 +5,66 @@ import matplotlib.pyplot as plt
 # -------------------------------
 # Sample DataFrame creation
 # -------------------------------
-# For demonstration, we create a dummy dataset.
-# Replace this with your own data loading method.
+# Replace this with your actual data
 np.random.seed(0)
 data1 = pd.DataFrame({
     'eid_pid': range(1, 101),
-    'cat1': np.random.choice(['A', 'B', 'C'], size=100),
-    'cat2': np.random.choice(['X', 'Y'], size=100),
+    'num1': np.random.normal(50, 10, size=100),
+    'num2': np.random.uniform(0, 100, size=100),
     'target': np.random.choice([-1, 0, 1], size=100)
 })
 
-# List of categorical variable columns
-cat_vars = ['cat1', 'cat2']
+# List of numerical variables
+num_vars = ['num1', 'num2']
 target_col = 'target'
 
 # -------------------------------
-# Plotting for each categorical variable
+# Plotting for each numerical variable
 # -------------------------------
-for col in cat_vars:
-    # Calculate total count for each distinct value in the categorical variable.
-    total_counts = data1.groupby(col)['eid_pid'].count().rename('total')
-    
-    # Calculate the counts for each target value within each group.
-    target_counts = data1.groupby([col, target_col])['eid_pid'].count().unstack(fill_value=0)
-    
-    # Combine the aggregated results
+for col in num_vars:
+    # Create 10 equal-width bins for the numerical variable
+    data1[f'{col}_bin'] = pd.cut(data1[col], bins=10)
+
+    # Count total per bin
+    total_counts = data1.groupby(f'{col}_bin')['eid_pid'].count().rename('total')
+
+    # Count target distribution per bin
+    target_counts = data1.groupby([f'{col}_bin', target_col])['eid_pid'].count().unstack(fill_value=0)
+
+    # Combine into one DataFrame
     aggregated = total_counts.to_frame().join(target_counts)
-    aggregated = aggregated.reset_index().sort_values(col)
-    
-    # Create the plot with two y-axes
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+    aggregated = aggregated.reset_index()
+
+    # Convert bin labels to strings for plotting
+    bin_labels = aggregated[f'{col}_bin'].astype(str)
+
+    # Plot
+    fig, ax1 = plt.subplots(figsize=(12, 6))
     ax2 = ax1.twinx()
-    
-    # Bar chart for total counts (primary y-axis)
-    ax1.bar(aggregated[col], aggregated['total'], color='lightgray', alpha=0.7, label='Total Count')
-    
-    # Define colors for each target level
+
+    # Bar plot of total count
+    ax1.bar(bin_labels, aggregated['total'], color='lightgray', alpha=0.7, label='Total Count')
+
+    # Line plots for proportions
     colors = {-1: 'red', 0: 'green', 1: 'blue'}
-    
-    # Overlay line charts for each target level (secondary y-axis)
-    # Here, we compute the proportion of each target in that group.
     for target_value, color in colors.items():
         if target_value in aggregated.columns:
-            # Calculate the proportion for the target level.
             proportion = aggregated[target_value] / aggregated['total']
-            ax2.plot(aggregated[col], proportion, marker='o', color=color, label=f"Proportion Target {target_value}")
-    
-    # Set labels and title
-    ax1.set_xlabel(col)
+            ax2.plot(bin_labels, proportion, marker='o', color=color, label=f"Proportion Target {target_value}")
+
+    ax1.set_xlabel(f'{col} (binned)')
     ax1.set_ylabel('Total Count')
     ax2.set_ylabel('Proportion of Target')
-    ax1.set_title(f"Distribution for {col}")
-    
-    # Combine legends from both axes
+    ax1.set_title(f"Distribution for {col} (Binned)")
+    ax1.tick_params(axis='x', rotation=45)
+
+    # Combine legends
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-    
-    plt.xticks(rotation=45)
+
     plt.tight_layout()
     plt.show()
+
+    # Clean up the bin column
+    data1.drop(columns=[f'{col}_bin'], inplace=True)
