@@ -1,27 +1,65 @@
-from sklearn.metrics import confusion_matrix
-import seaborn as sns
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 
-cm = confusion_matrix(y_test, y_pred)
+# -------------------------------
+# Sample DataFrame creation
+# -------------------------------
+# For demonstration, we create a dummy dataset.
+# Replace this with your own data loading method.
+np.random.seed(0)
+data1 = pd.DataFrame({
+    'eid_pid': range(1, 101),
+    'cat1': np.random.choice(['A', 'B', 'C'], size=100),
+    'cat2': np.random.choice(['X', 'Y'], size=100),
+    'target': np.random.choice([-1, 0, 1], size=100)
+})
 
-plt.figure(figsize=(6,6))
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=[0,1,2], yticklabels=[0,1,2])
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.title("Confusion Matrix")
-plt.show()
+# List of categorical variable columns
+cat_vars = ['cat1', 'cat2']
+target_col = 'target'
 
-from sklearn.metrics import classification_report
-
-print(classification_report(y_test, y_pred, digits=4))
-
-from sklearn.metrics import roc_auc_score
-from sklearn.preprocessing import label_binarize
-
-y_test_bin = label_binarize(y_test, classes=[0, 1, 2])
-y_prob = model.predict_proba(X_test)
-
-auc = roc_auc_score(y_test_bin, y_prob, average="weighted", multi_class="ovr")
-print(f"ROC-AUC Score: {auc:.4f}")
-
-
+# -------------------------------
+# Plotting for each categorical variable
+# -------------------------------
+for col in cat_vars:
+    # Calculate total count for each distinct value in the categorical variable.
+    total_counts = data1.groupby(col)['eid_pid'].count().rename('total')
+    
+    # Calculate the counts for each target value within each group.
+    # This produces a table with target values as columns.
+    target_counts = data1.groupby([col, target_col])['eid_pid'].count().unstack(fill_value=0)
+    
+    # Combine the aggregated results
+    aggregated = total_counts.to_frame().join(target_counts)
+    aggregated = aggregated.reset_index().sort_values(col)
+    
+    # Create the plot with two y-axes
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+    
+    # Bar chart for total counts (primary y-axis)
+    ax1.bar(aggregated[col], aggregated['total'], color='lightgray', alpha=0.7, label='Total Count')
+    
+    # Define colors for each target level
+    colors = {-1: 'red', 0: 'green', 1: 'blue'}
+    
+    # Overlay line charts for each target level (secondary y-axis)
+    for target_value, color in colors.items():
+        if target_value in aggregated.columns:
+            ax2.plot(aggregated[col], aggregated[target_value], marker='o', color=color, label=f"Target {target_value}")
+    
+    # Set labels and title
+    ax1.set_xlabel(col)
+    ax1.set_ylabel('Total Count')
+    ax2.set_ylabel('Target Count')
+    ax1.set_title(f"Distribution for {col}")
+    
+    # Combine legends from both axes
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
