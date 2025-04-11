@@ -2,98 +2,96 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 import matplotlib.pyplot as plt
 
-# ----- Data Preparation -----
-# Assume that data_s is an existing pandas DataFrame containing your dataset,
-# with a target column named "target" and several feature columns.
-# If you do not have data_s loaded already, you can uncomment the following
-# code to create a sample dataset for demonstration.
+# ---------------------------
+# Data Preparation
+# ---------------------------
+# Assume that data_s is an already loaded pandas DataFrame with columns: 'id', 'yearmonth', 
+# 'target' (with levels -1, 0, 1), and several other predictor features (which may be numeric or categorical).
 
-# np.random.seed(42)  # For reproducible results
-# sample_size = 200
-# data_s = pd.DataFrame({
-#     'feature1': np.random.rand(sample_size),
-#     'feature2': np.random.rand(sample_size),
-#     'feature3': np.random.rand(sample_size),
-#     'feature4': np.random.rand(sample_size),
-#     'target': np.random.choice([-1, 0, 1], size=sample_size)
-# })
-
-# Take a quick look at the dataset
-print("First few rows of the dataset:\n", data_s.head())
+# Display basic dataset information
 print("Dataset shape:", data_s.shape)
 print("Target distribution:\n", data_s['target'].value_counts())
 
-# Separate the features and the target variable.
-target_col = 'target'
-# Assume all columns except the target are feature columns.
-feature_cols = [col for col in data_s.columns if col != target_col]
+# Exclude unwanted columns from predictors
+exclude_cols = ['id', 'yearmonth', 'target']
+predictor_cols = [col for col in data_s.columns if col not in exclude_cols]
 
-# Split the dataset into training and testing sets (80% train, 20% test)
-X = data_s[feature_cols]
-y = data_s[target_col]
+# ----- Missing Value Treatment -----
+# For numeric columns, impute missing values with the mean.
+# For non-numeric columns, impute missing values with the mode.
+for col in predictor_cols:
+    if data_s[col].dtype in ['int64', 'float64']:
+        data_s[col].fillna(data_s[col].mean(), inplace=True)
+    else:
+        data_s[col].fillna(data_s[col].mode()[0], inplace=True)
+
+# Identify numeric and categorical predictor columns
+numeric_features = data_s[predictor_cols].select_dtypes(include=['int64', 'float64']).columns.tolist()
+categorical_features = [col for col in predictor_cols if col not in numeric_features]
+
+print("\nNumeric predictors:", numeric_features)
+print("Categorical predictors:", categorical_features)
+
+# ---------------------------
+# Building the Model Pipeline
+# ---------------------------
+# We'll use a ColumnTransformer to preprocess numeric features (scaling) and categorical features (one-hot encoding).
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(drop='first'), categorical_features)
+    ])
+
+# Create a pipeline that first preprocesses the data and then fits a multinomial logistic regression model.
+model_pipeline = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('clf', LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42))
+])
+
+# ---------------------------
+# Splitting the Data
+# ---------------------------
+# Define X (predictors) and y (target)
+X = data_s[predictor_cols]
+y = data_s['target']
+
+# Split the dataset into training and test sets (80% train, 20% test)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# ----- Incremental Model Training and Evaluation -----
-# We will progressively add features in the order they appear in the dataset.
-# For each number of features (from 1 up to all available features),
-# we will: 
-#   1. Subset the data to use the selected features.
-#   2. Standardize the subset of features.
-#   3. Fit a multinomial logistic regression model.
-#   4. Evaluate the model's accuracy on the test set.
-#   5. Print the results.
+# ---------------------------
+# Training and Evaluating the Model
+# ---------------------------
+# Train the pipeline (which fits both preprocessing and classification)
+model_pipeline.fit(X_train, y_train)
 
-# Lists to store the number of features used and the corresponding accuracy
-accuracy_list = []
-features_used = []
+# Predict on the test set
+y_pred = model_pipeline.predict(X_test)
 
-for i in range(1, len(feature_cols) + 1):
-    # Select the first 'i' features from the list of features
-    current_features = feature_cols[:i]
-    print(f"Using features: {current_features}")
-    
-    # Subset the training and testing data based on the current features
-    X_train_sub = X_train[current_features]
-    X_test_sub = X_test[current_features]
-    
-    # Standardize the features (important for logistic regression performance)
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_sub)
-    X_test_scaled = scaler.transform(X_test_sub)
-    
-    # Create and train the multinomial logistic regression model.
-    # Here we set multi_class='multinomial' and choose the 'lbfgs' solver.
-    model = LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42)
-    model.fit(X_train_scaled, y_train)
-    
-    # Use the trained model to make predictions on the test set.
-    y_pred = model.predict(X_test_scaled)
-    
-    # Calculate the accuracy score on the test set.
-    acc = accuracy_score(y_test, y_pred)
-    accuracy_list.append(acc)
-    features_used.append(i)
-    print(f"Accuracy with {i} feature(s): {acc:.4f}\n")
-    
-    # For the final model (using all features), print additional evaluation metrics.
-    if i == len(feature_cols):
-        print("Confusion Matrix:")
-        print(confusion_matrix(y_test, y_pred))
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred))
+# Evaluate model performance
+acc = accuracy_score(y_test, y_pred)
+print("\nTest Accuracy: {:.4f}".format(acc))
 
-# ----- Visualization -----
-# Plot a line graph showing how the test accuracy changes as we add more features.
-plt.figure(figsize=(10, 6))
-plt.plot(features_used, accuracy_list, marker='o', linestyle='-', color='b')
-plt.title('Multinomial Logistic Regression Accuracy with Incremental Feature Addition')
-plt.xlabel('Number of Features Used')
-plt.ylabel('Test Accuracy')
-plt.xticks(features_used)  # Show each feature count on the x-axis
-plt.grid(True)
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+# ---------------------------
+# Optional: Visualization of Model Performance
+# ---------------------------
+# Here we create a simple bar plot to show the number of observations per actual target class
+plt.figure(figsize=(8, 5))
+y.value_counts().sort_index().plot(kind='bar', color='skyblue', edgecolor='black')
+plt.title('Number of Observations per Target Class')
+plt.xlabel('Target Class')
+plt.ylabel('Frequency')
+plt.xticks(rotation=0)
 plt.show()
