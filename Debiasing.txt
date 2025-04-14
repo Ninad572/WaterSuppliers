@@ -1,97 +1,34 @@
-# Import required libraries
 import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-import matplotlib.pyplot as plt
 
-# ---------------------------
-# Data Preparation
-# ---------------------------
-# Assume that data_s is an already loaded pandas DataFrame with columns: 'id', 'yearmonth', 
-# 'target' (with levels -1, 0, 1), and several other predictor features (which may be numeric or categorical).
+def get_target(df):
+    # Assure that the DataFrame is sorted in chronological order, if not already
+    # df = df.sort_values('date_column')
+    
+    # Create shifted columns for the next three rows (future periods)
+    df['next1'] = df['DFRL_PCT'].shift(-1)
+    df['next2'] = df['DFRL_PCT'].shift(-2)
+    df['next3'] = df['DFRL_PCT'].shift(-3)
+    
+    # Compute conditions for the next three values being monotonically increasing or decreasing.
+    # Using non-decreasing/increasing comparisons. If you need strict monotonicity, change
+    # <= to < and >= to > accordingly.
+    inc_cond = (df['next1'] <= df['next2']) & (df['next2'] <= df['next3'])
+    dec_cond = (df['next1'] >= df['next2']) & (df['next2'] >= df['next3'])
+    
+    # Compare current value to the prior value.
+    # NOTE: Ensure that both 'DFRL_PCT' (current) and 'PRR_EOM_DFRL_PCT' (prior) columns are numeric.
+    cond_inc = (df['DFRL_PCT'] > df['PRR_EOM_DFRL_PCT']) & inc_cond
+    cond_dec = (df['DFRL_PCT'] < df['PRR_EOM_DFRL_PCT']) & dec_cond
+    
+    # Set the TARGET column based on the conditions
+    df['TARGET'] = 0  # default target is 0
+    df.loc[cond_inc, 'TARGET'] = 1
+    df.loc[cond_dec, 'TARGET'] = -1
+    
+    # Clean up the helper columns if you no longer need them
+    df.drop(columns=['next1', 'next2', 'next3'], inplace=True)
+    
+    return df
 
-# Display basic dataset information
-print("Dataset shape:", data_s.shape)
-print("Target distribution:\n", data_s['target'].value_counts())
-
-# Exclude unwanted columns from predictors
-exclude_cols = ['id', 'yearmonth', 'target']
-predictor_cols = [col for col in data_s.columns if col not in exclude_cols]
-
-# ----- Missing Value Treatment -----
-# For numeric columns, impute missing values with the mean.
-# For non-numeric columns, impute missing values with the mode.
-for col in predictor_cols:
-    if data_s[col].dtype in ['int64', 'float64']:
-        data_s[col].fillna(data_s[col].mean(), inplace=True)
-    else:
-        data_s[col].fillna(data_s[col].mode()[0], inplace=True)
-
-# Identify numeric and categorical predictor columns
-numeric_features = data_s[predictor_cols].select_dtypes(include=['int64', 'float64']).columns.tolist()
-categorical_features = [col for col in predictor_cols if col not in numeric_features]
-
-print("\nNumeric predictors:", numeric_features)
-print("Categorical predictors:", categorical_features)
-
-# ---------------------------
-# Building the Model Pipeline
-# ---------------------------
-# We'll use a ColumnTransformer to preprocess numeric features (scaling) and categorical features (one-hot encoding).
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', StandardScaler(), numeric_features),
-        ('cat', OneHotEncoder(drop='first'), categorical_features)
-    ])
-
-# Create a pipeline that first preprocesses the data and then fits a multinomial logistic regression model.
-model_pipeline = Pipeline(steps=[
-    ('preprocessor', preprocessor),
-    ('clf', LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42))
-])
-
-# ---------------------------
-# Splitting the Data
-# ---------------------------
-# Define X (predictors) and y (target)
-X = data_s[predictor_cols]
-y = data_s['target']
-
-# Split the dataset into training and test sets (80% train, 20% test)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# ---------------------------
-# Training and Evaluating the Model
-# ---------------------------
-# Train the pipeline (which fits both preprocessing and classification)
-model_pipeline.fit(X_train, y_train)
-
-# Predict on the test set
-y_pred = model_pipeline.predict(X_test)
-
-# Evaluate model performance
-acc = accuracy_score(y_test, y_pred)
-print("\nTest Accuracy: {:.4f}".format(acc))
-
-print("\nConfusion Matrix:")
-print(confusion_matrix(y_test, y_pred))
-
-print("\nClassification Report:")
-print(classification_report(y_test, y_pred))
-
-# ---------------------------
-# Optional: Visualization of Model Performance
-# ---------------------------
-# Here we create a simple bar plot to show the number of observations per actual target class
-plt.figure(figsize=(8, 5))
-y.value_counts().sort_index().plot(kind='bar', color='skyblue', edgecolor='black')
-plt.title('Number of Observations per Target Class')
-plt.xlabel('Target Class')
-plt.ylabel('Frequency')
-plt.xticks(rotation=0)
-plt.show()
+# Apply the logic group-wise via groupby so each group's ordering is maintained
+data_s = data_s.groupby('PRTCP_ID', group_keys=False).apply(get_target)
