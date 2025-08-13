@@ -1,0 +1,180 @@
+import numpy as np
+import pandas as pd
+import math
+from typing import Tuple, Dict, List, Optional
+
+def _clean_numeric(series: pd.Series) -> np.ndarray:
+    arr = pd.to_numeric(series, errors='coerce').dropna().astype(float).values
+    if arr.size == 0:
+        raise ValueError("No valid numeric values after cleaning.")
+    return arr
+
+def _compute_quantile_grid(baseline: np.ndarray, quantiles: List[float]) -> np.ndarray:
+    # Unique, sorted quantile cutpoints (grid for CDF eval and bin edges for PSI)
+    qs = np.unique(np.clip(quantiles, 0.0, 1.0))
+    return np.quantile(baseline, qs, method='linear')
+
+def _ecdf_at_points(values: np.ndarray, points: np.ndarray) -> np.ndarray:
+    # For each point x, ECDF(x) = fraction of values <= x
+    sorted_vals = np.sort(values)
+    ranks = np.searchsorted(sorted_vals, points, side='right')
+    return ranks / sorted_vals.size
+
+def linf_quantile_based(
+    data_x: pd.DataFrame,
+    data_y: pd.DataFrame,
+    col: str = "PFG_TNR_MO",
+    quantiles: Optional[List[float]] = None,
+    baseline: str = "data_y",
+    return_grid: bool = False
+) -> Tuple[float, Optional[pd.DataFrame]]:
+    """
+    Quantile-based KS (L∞) distance.
+    - Learns a quantile grid from the baseline (data_y by default).
+    - Evaluates ECDFs of both datasets at those points.
+    - Returns max absolute difference.
+
+    Parameters:
+      data_x, data_y: input DataFrames
+      col: numeric column to compare
+      quantiles: list of quantiles for grid (default: 100 points at 1%,2%,...,99%)
+      baseline: "data_y" or "data_x" for learning the grid
+      return_grid: if True, also returns a DataFrame with per-quantile CDFs and diffs
+
+    Returns:
+      (linf, grid_df_optional)
+    """
+    if quantiles is None:
+        # 1%..99% gives a dense and robust grid
+        quantiles = [i/100 for i in range(1, 100)]
+
+    x = _clean_numeric(data_x[col])
+    y = _clean_numeric(data_y[col])
+
+    base = y if baseline == "data_y" else x
+    points = _compute_quantile_grid(base, quantiles)
+
+    cdf_x = _ecdf_at_points(x, points)
+    cdf_y = _ecdf_at_points(y, points)
+
+    diffs = np.abs(cdf_x - cdf_y)
+    linf = float(diffs.max())
+
+    grid_df = None
+    if return_grid:
+        grid_df = pd.DataFrame({
+            "quantile": quantiles[:len(points)],  # may be fewer if quantiles collapsed due to ties
+            "point": points,
+            "cdf_x": cdf_x,
+            "cdf_y": cdf_y,
+            "abs_diff": diffs
+        }).sort_values("abs_diff", ascending=False).reset_index(drop=True)
+
+    return linf, grid_df
+
+def psi_quantile_binning(
+    data_x: pd.DataFrame,
+    data_y: pd.DataFrame,
+    col: str = "PFG_TNR_MO",
+    bins: int = 10,
+    baseline: str = "data_y",
+    epsilon: float = 1e-6,
+    return_breakdown: bool = False
+) -> Tuple[float, Optional[pd.DataFrame]]:
+    """
+    PSI with quantile-based bins learned from the baseline (expected) dataset.
+    - Learns (bins-1) quantile cutpoints from baseline.
+    - Builds fixed edges with overflow: (-inf, q1], (q1, q2], ..., (q_{K-1}, +inf)
+    - Applies bins to both datasets and computes PSI.
+
+    Parameters:
+      data_x, data_y: input DataFrames
+      col: numeric column
+      bins: number of bins (e.g., 10 for deciles)
+      baseline: "data_y" or "data_x" to define bin edges
+      epsilon: small value to avoid log(0) when a bin has 0 proportion
+      return_breakdown: if True, returns per-bin contributions
+
+    Returns:
+      (psi_value, breakdown_df_optional)
+    """
+    if bins < 2:
+        raise ValueError("bins must be >= 2")
+
+    x = _clean_numeric(data_x[col])
+    y = _clean_numeric(data_y[col])
+
+    base = y if baseline == "data_y" else x
+
+    # Learn internal cutpoints at quantiles: 1/bins, 2/bins, ..., (bins-1)/bins
+    qs = [i / bins for i in range(1, bins)]
+    cuts = _compute_quantile_grid(base, qs)
+
+    # Build fixed edges with overflow handling
+    edges = np.concatenate(([-np.inf], cuts, [np.inf]))
+
+    # Bin and count for both datasets
+    def bin_counts(values: np.ndarray, edges: np.ndarray) -> np.ndarray:
+        idx = np.digitize(values, edges[1:-1], right=True)  # returns 0..(bins-1)
+        counts = np.bincount(idx, minlength=bins)
+        return counts.astype(float)
+
+    counts_x = bin_counts(x, edges)
+    counts_y = bin_counts(y, edges)
+
+    sum_x = counts_x.sum()
+    sum_y = counts_y.sum()
+    Px = counts_x / sum_x
+    Qy = counts_y / sum_y
+
+    # Apply epsilon to avoid log(0) and division by zero
+    Px_safe = np.maximum(Px, epsilon)
+    Qy_safe = np.maximum(Qy, epsilon)
+
+    contrib = (Px_safe - Qy_safe) * np.log(Px_safe / Qy_safe)
+    psi_value = float(contrib.sum())
+
+    breakdown = None
+    if return_breakdown:
+        # Build readable bin labels
+        labels = []
+        for i in range(bins):
+            lo = edges[i]
+            hi = edges[i+1]
+            labels.append(f"({lo if np.isfinite(lo) else '-inf'}, {hi if np.isfinite(hi) else 'inf'}]")
+
+        breakdown = pd.DataFrame({
+            "bin": range(bins),
+            "edge_left": edges[:-1],
+            "edge_right": edges[1:],
+            "count_actual": counts_x,
+            "count_expected": counts_y,
+            "prop_actual": Px,
+            "prop_expected": Qy,
+            "contribution": contrib,
+            "label": labels
+        })
+
+    return psi_value, breakdown
+
+
+
+# L∞ (KS) on quantile grid learned from data_y (baseline), with debug table:
+linf, grid_table = linf_quantile_based(
+    data_x, data_y, col="PFG_TNR_MO",
+    quantiles=[i/100 for i in range(1, 100)],
+    baseline="data_y",
+    return_grid=True
+)
+print(f"L-infinity (quantile-based) = {linf:.6f}")
+# grid_table.head() shows the largest differences first
+
+# PSI with decile bins learned from data_y (baseline), with per-bin breakdown:
+psi, psi_table = psi_quantile_binning(
+    data_x, data_y, col="PFG_TNR_MO",
+    bins=10, baseline="data_y",
+    epsilon=1e-6,
+    return_breakdown=True
+)
+print(f"PSI (decile bins from baseline) = {psi:.6f}")
+# psi_table shows edges, proportions, and per-bin contributions
