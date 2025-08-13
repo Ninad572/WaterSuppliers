@@ -1,56 +1,83 @@
+import pandas as pd
 import numpy as np
 
-def max_cdf_difference_numpy(vals1, vals2):
-    """
-    Compute max CDF difference (KS statistic) between two numeric arrays using NumPy.
-    vals1: 1D array-like of floats/ints (Dataset 1, vertical 12 months per ID)
-    vals2: 1D array-like of floats/ints (Dataset 2, 1 per ID)
-    Returns (max_diff, at_value)
-    """
-    # Convert to numpy, drop NaNs
-    x = np.asarray(vals1, dtype=float)
-    y = np.asarray(vals2, dtype=float)
-    x = x[~np.isnan(x)]
-    y = y[~np.isnan(y)]
-    n = x.size
-    m = y.size
-    if n == 0 or m == 0:
-        raise ValueError("One of the datasets has no valid data.")
+# ----------------------------
+# Step 1 — Load / prepare your datasets
+# ----------------------------
+# Example: Dataset 1 ("vertical" – multiple months per ID)
+data_x = pd.DataFrame({
+    'BUSN_ACNT_ID': ['E1']*3 + ['E2']*3 + ['E3']*3,
+    'MO_END_DT': ['2025-01', '2025-02', '2025-03']*3,
+    'PFG_TNR_MO': [3000, 3100, 3200,
+                   4000, 4100, 4150,
+                   5000, 5050, 5100]
+})
 
-    # Sort
-    x.sort()
-    y.sort()
+# Example: Dataset 2 (single month per ID)
+data_y = pd.DataFrame({
+    'ACNT_ID': ['E1', 'E2', 'E3'],
+    'PFG_TNR_MO': [3200, 4150, 5100]
+})
 
-    # Unique values and counts (to construct step CDFs efficiently)
-    ux, cx = np.unique(x, return_counts=True)
-    uy, cy = np.unique(y, return_counts=True)
+# ----------------------------
+# Step 2 — Extract just the numeric values
+# ----------------------------
+vals1 = pd.to_numeric(data_x['PFG_TNR_MO'], errors='coerce').dropna().astype(float).values
+vals2 = pd.to_numeric(data_y['PFG_TNR_MO'], errors='coerce').dropna().astype(float).values
 
-    # Cumulative counts -> CDF steps at unique points
-    cfx = np.cumsum(cx) / n
-    cfy = np.cumsum(cy) / m
+# ----------------------------
+# Step 3 — Sort both datasets
+# ----------------------------
+vals1.sort()
+vals2.sort()
 
-    # Merge the two step functions over the union of unique values
-    u = np.union1d(ux, uy)
+n = len(vals1)  # total observations in dataset 1
+m = len(vals2)  # total observations in dataset 2
 
-    # For each u, find rightmost index in ux, uy where value <= u,
-    # then read the CDF value from cfx/cfy. If no such index, CDF=0.
-    idx_x = np.searchsorted(ux, u, side='right') - 1
-    idx_y = np.searchsorted(uy, u, side='right') - 1
+# ----------------------------
+# Step 4 — Get unique values & counts
+# ----------------------------
+u1, c1 = np.unique(vals1, return_counts=True)
+u2, c2 = np.unique(vals2, return_counts=True)
 
-    # Gather CDF values with boundary handling
-    cdf_x = np.where(idx_x >= 0, cfx[idx_x], 0.0)
-    cdf_y = np.where(idx_y >= 0, cfy[idx_y], 0.0)
+# ----------------------------
+# Step 5 — Cumulative counts → CDF steps
+# ----------------------------
+cdf1_steps = np.cumsum(c1) / n
+cdf2_steps = np.cumsum(c2) / m
 
-    diff = np.abs(cdf_x - cdf_y)
-    max_idx = np.argmax(diff)
-    return float(diff[max_idx]), float(u[max_idx])
+# ----------------------------
+# Step 6 — Union of all unique values
+# ----------------------------
+all_vals = np.union1d(u1, u2)
 
+# ----------------------------
+# Step 7 — For each value in union, get CDF from both datasets
+# ----------------------------
+idx1 = np.searchsorted(u1, all_vals, side='right') - 1
+idx2 = np.searchsorted(u2, all_vals, side='right') - 1
 
+cdf1 = np.where(idx1 >= 0, cdf1_steps[idx1], 0.0)
+cdf2 = np.where(idx2 >= 0, cdf2_steps[idx2], 0.0)
 
+# ----------------------------
+# Step 8 — Compute absolute differences
+# ----------------------------
+diffs = np.abs(cdf1 - cdf2)
 
-# df1: data_x with vertical 12 months per ID
-# df2: data_y with 1 per ID
-vals1 = data_x['PFG_TNR_MO'].values
-vals2 = data_y['PFG_TNR_MO'].values
-max_diff, at_value = max_cdf_difference_numpy(vals1, vals2)
-print(f"Max CDF difference = {max_diff:.6f} at value {at_value}")
+# ----------------------------
+# Step 9 — Find the maximum difference & the value where it occurs
+# ----------------------------
+max_idx = np.argmax(diffs)
+max_diff = diffs[max_idx]
+max_val = all_vals[max_idx]
+
+# ----------------------------
+# Step 10 — Output
+# ----------------------------
+print("=== CDF Comparison Table ===")
+print(f"{'Value':>10}  {'CDF1':>10}  {'CDF2':>10}  {'AbsDiff':>10}")
+for v, c1, c2, d in zip(all_vals, cdf1, cdf2, diffs):
+    print(f"{v:>10.0f}  {c1:>10.4f}  {c2:>10.4f}  {d:>10.4f}")
+
+print(f"\nMax CDF difference = {max_diff:.4f} at value {max_val}")
