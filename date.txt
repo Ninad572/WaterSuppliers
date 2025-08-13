@@ -1,74 +1,44 @@
-import numpy as np
+# pip install pandas datasketches numpy
 import pandas as pd
+import numpy as np
+from datasketches import kll_floats_sketch
 
-# ---- Load your datasets ----
-# Replace these lines with your real data loading
-# Example:
-# data_x = pd.read_csv("data_x.csv")
-# data_y = pd.read_csv("data_y.csv")
+# --- Define the helper classes and functions from before ---
+# (QuantileNonSample, select_metrics, numerical_distance)
+# The same as in the previous code, no change needed
 
-# For demo purposes let's assume these are your DataFrames
-# data_x and data_y must have a numeric column 'PFG_TNR_MO'
+# ... insert QuantileNonSample, select_metrics, numerical_distance from previous code ...
 
-# ---------------------------------------------------------
-# Functions for common decile edges and bin assignment
-# ---------------------------------------------------------
-
-def common_decile_edges(series):
+def compute_overall_drift(data_x, data_y,
+                          value_col="PFG_TNR_MO_CNT",
+                          kll_k=200,
+                          correct_for_low_samples=False,
+                          alpha=None):
     """
-    Computes common decile edges from the baseline series.
-    Includes (-inf, ...) and (..., inf) overflow edges.
-    Handles NaNs and ties.
+    Compare distribution of value_col in entire data_x vs entire data_y.
     """
-    clean_vals = pd.to_numeric(series, errors='coerce').dropna().astype(float)
-    if clean_vals.empty:
-        raise ValueError("Baseline series has no valid numeric values.")
-    # Deciles at 10%, 20%, ..., 90%
-    qs = np.quantile(clean_vals, q=[i/10 for i in range(1, 10)], method='linear')
-    qs = np.unique(qs)  # Remove duplicate cut points
-    edges = np.concatenate(([-np.inf], qs, [np.inf]))
-    return edges
+    vx = data_x[value_col].dropna().astype(float).values
+    vy = data_y[value_col].dropna().astype(float).values
 
-def apply_edges_to_series(series, edges):
-    """
-    Assigns bin numbers 1..K to the series based on edges.
-    """
-    vals = pd.to_numeric(series, errors='coerce').astype(float)
-    bins = np.digitize(vals, edges[1:-1], right=True) + 1
-    return bins
+    qx = QuantileNonSample(vx, k=kll_k)
+    qy = QuantileNonSample(vy, k=kll_k)
 
-# ---------------------------------------------------------
-# Apply to your datasets
-# ---------------------------------------------------------
+    dist = numerical_distance(qx, qy,
+                               correct_for_low_samples=correct_for_low_samples,
+                               alpha=alpha)
 
-# Learn edges from baseline dataset (data_y)
-edges = common_decile_edges(data_y['PFG_TNR_MO'])
+    return {
+        "n_x": int(qx.n),
+        "n_y": int(qy.n),
+        "linf_distance": dist
+    }
 
-# Apply the same edges to both datasets
-data_y = data_y.copy()
-data_x = data_x.copy()
-data_y['decile'] = apply_edges_to_series(data_y['PFG_TNR_MO'], edges)
-data_x['decile'] = apply_edges_to_series(data_x['PFG_TNR_MO'], edges)
-
-# ---------------------------------------------------------
-# Print results
-# ---------------------------------------------------------
-
-print("Common decile edges learned from baseline (data_y):")
-for i in range(len(edges)-1):
-    lo = edges[i]
-    hi = edges[i+1]
-    print(f"Decile {i+1}: ({'-inf' if not np.isfinite(lo) else lo}, "
-          f"{'inf' if not np.isfinite(hi) else hi}]")
-
-print("\nDecile counts for data_y:")
-print(data_y['decile'].value_counts().sort_index())
-
-print("\nDecile counts for data_x:")
-print(data_x['decile'].value_counts().sort_index())
-
-print("\nPreview data_y:")
-print(data_y.head())
-
-print("\nPreview data_x:")
-print(data_x.head())
+# --- Example ---
+# drift_result = compute_overall_drift(
+#     data_x, data_y,
+#     value_col="PFG_TNR_MO_CNT",
+#     kll_k=200,
+#     correct_for_low_samples=True,
+#     alpha=0.05
+# )
+# print(drift_result)
