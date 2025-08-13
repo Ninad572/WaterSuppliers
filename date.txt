@@ -3,20 +3,107 @@ import pandas as pd
 import numpy as np
 from datasketches import kll_floats_sketch
 
-# --- Define the helper classes and functions from before ---
-# (QuantileNonSample, select_metrics, numerical_distance)
-# The same as in the previous code, no change needed
+# --------------------------------------------------------
+# Helper: QuantileNonSample class to wrap KLL and ranks
+# --------------------------------------------------------
+class QuantileNonSample:
+    def __init__(self, values, k=200):
+        self.sketch = kll_floats_sketch(k)
+        cnt = 0
+        for v in values:
+            if pd.notna(v):
+                self.sketch.update(float(v))
+                cnt += 1
+        self.n = cnt
 
-# ... insert QuantileNonSample, select_metrics, numerical_distance from previous code ...
+    def is_empty(self):
+        return self.n == 0
 
+    def getRankMap(self, num_support=200):
+        if self.is_empty():
+            return {}
+        q = np.linspace(0.0, 1.0, num=min(self.n, num_support) + 2)
+        vals = sorted(set(self.sketch.get_quantiles(q.tolist())))
+        rank_map = {}
+        for val in vals:
+            frac = self.sketch.get_rank(float(val))
+            rank = max(1, min(self.n, int(round(frac * self.n))))
+            rank_map[val] = rank
+        sorted_items = sorted(rank_map.items())
+        last_rank = 0
+        fixed = {}
+        for v, r in sorted_items:
+            r = max(r, last_rank)
+            r = min(r, self.n)
+            if r <= last_rank and r < self.n:
+                r = last_rank + 1
+            last_rank = r
+            fixed[v] = r
+        return fixed
+
+    def getRank(self, key, rank_map):
+        if not rank_map:
+            return 0
+        if key in rank_map:
+            return rank_map[key]
+        keys = sorted(rank_map.keys())
+        if key < keys[0]:
+            return rank_map[keys[0]]
+        if key > keys[-1]:
+            return rank_map[keys[-1]]
+        lo, hi = 0, len(keys) - 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if keys[mid] == key:
+                return rank_map[keys[mid]]
+            elif keys[mid] < key:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        lower_key = keys[max(0, hi)]
+        upper_key = keys[min(len(keys) - 1, lo)]
+        if abs(key - lower_key) <= abs(upper_key - key):
+            return rank_map[lower_key]
+        else:
+            return rank_map[upper_key]
+
+
+def select_metrics(linf_simple, n, m, correct_for_low_samples=False, alpha=None):
+    if not correct_for_low_samples or not alpha:
+        return float(linf_simple)
+    alpha = float(alpha)
+    alpha = min(max(alpha, 1e-12), 0.5)
+    eps_n = np.sqrt(max(0.0, np.log(2.0 / alpha) / (2.0 * max(n, 1.0))))
+    eps_m = np.sqrt(max(0.0, np.log(2.0 / alpha) / (2.0 * max(m, 1.0))))
+    corrected = linf_simple + (eps_n + eps_m)
+    return float(min(1.0, corrected))
+
+
+def numerical_distance(sample1, sample2, correct_for_low_samples=False, alpha=None):
+    rank_map1 = sample1.getRankMap()
+    rank_map2 = sample2.getRankMap()
+    combined_keys = sorted(set(rank_map1.keys()).union(rank_map2.keys()))
+    n = float(max(rank_map1.values()) if rank_map1 else 0)
+    m = float(max(rank_map2.values()) if rank_map2 else 0)
+
+    linf_simple = 0.0
+    for key in combined_keys:
+        cdf1 = (sample1.getRank(key, rank_map1) / n) if n > 0 else 0.0
+        cdf2 = (sample2.getRank(key, rank_map2) / m) if m > 0 else 0.0
+        cdf_diff = abs(cdf1 - cdf2)
+        if cdf_diff > linf_simple:
+            linf_simple = cdf_diff
+    return select_metrics(linf_simple, n, m, correct_for_low_samples, alpha)
+
+
+# --------------------------------------------------------
+# Overall drift computation (baseline vs new snapshot)
+# --------------------------------------------------------
 def compute_overall_drift(data_x, data_y,
                           value_col="PFG_TNR_MO_CNT",
                           kll_k=200,
                           correct_for_low_samples=False,
                           alpha=None):
-    """
-    Compare distribution of value_col in entire data_x vs entire data_y.
-    """
     vx = data_x[value_col].dropna().astype(float).values
     vy = data_y[value_col].dropna().astype(float).values
 
@@ -33,12 +120,11 @@ def compute_overall_drift(data_x, data_y,
         "linf_distance": dist
     }
 
-# --- Example ---
-# drift_result = compute_overall_drift(
-#     data_x, data_y,
-#     value_col="PFG_TNR_MO_CNT",
-#     kll_k=200,
-#     correct_for_low_samples=True,
-#     alpha=0.05
-# )
-# print(drift_result)
+
+# ---------------------- Example -------------------------
+# df_x = pd.DataFrame({"PFG_TNR_MO_CNT": np.random.normal(10, 2, 1000)})
+# df_y = pd.DataFrame({"PFG_TNR_MO_CNT": np.random.normal(12, 2, 200)})
+# result = compute_overall_drift(df_x, df_y,
+#                                correct_for_low_samples=True,
+#                                alpha=0.05)
+# print(result)
