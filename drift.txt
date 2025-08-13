@@ -44,3 +44,13 @@ def max_cdf_difference_numpy(vals1, vals2):
     diff = np.abs(cdf_x - cdf_y)
     max_idx = np.argmax(diff)
     return float(diff[max_idx]), float(u[max_idx])
+
+
+
+
+# df1: data_x with vertical 12 months per ID
+# df2: data_y with 1 per ID
+vals1 = data_x['PFG_TNR_MO'].values
+vals2 = data_y['PFG_TNR_MO'].values
+max_diff, at_value = max_cdf_difference_numpy(vals1, vals2)
+print(f"Max CDF difference = {max_diff:.6f} at value {at_value}")
