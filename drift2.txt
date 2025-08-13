@@ -1,72 +1,83 @@
 import pandas as pd
 import numpy as np
 
-def numerical_distance(df1, col1, df2, col2, debug=False):
+def numerical_distance_exact(df1, col1, df2, col2, debug=False):
     """
-    Exact Python equivalent of Scala numericalDistance().
-    Computes max absolute CDF difference between two datasets.
-    
-    Parameters:
-        df1, col1 : DataFrame and numeric column for dataset 1 (data_x)
-        df2, col2 : DataFrame and numeric column for dataset 2 (data_y)
-        debug     : If True, prints the full CDF table
-    
-    Returns:
-        max_diff (float), at_value (float)
+    Exact Python version of Deequ's numericalDistance (raw KS statistic).
+    No small-sample correction is applied.
     """
-    
-    # 1️⃣ Extract numeric values & drop NaNs
+    # 1️⃣ Extract numeric values (drop NaNs)
     vals1 = pd.to_numeric(df1[col1], errors='coerce').dropna().astype(float).values
     vals2 = pd.to_numeric(df2[col2], errors='coerce').dropna().astype(float).values
     
     n = len(vals1)
     m = len(vals2)
     if n == 0 or m == 0:
-        raise ValueError("One of the datasets has no valid numeric values.")
-    
-    # 2️⃣ Build rank maps { value: rank }
+        raise ValueError("One of the datasets has no valid values")
+
+    # 2️⃣ Build rank maps exactly: value -> count of items ≤ value
     def build_rank_map(arr):
         sorted_vals = np.sort(arr)
         rank_map = {}
-        for val in np.unique(sorted_vals):
-            rank_map[val] = np.searchsorted(sorted_vals, val, side='right')  # count ≤ val
+        for v in np.unique(sorted_vals):
+            # rank is number of observations <= v
+            rank_map[v] = np.searchsorted(sorted_vals, v, side='right')
         return rank_map
-    
+
     rankMap1 = build_rank_map(vals1)
     rankMap2 = build_rank_map(vals2)
-    
-    # 3️⃣ Union of all unique values
+
+    # 3️⃣ Union of all keys (unique values from both datasets)
     combined_keys = sorted(set(rankMap1.keys()) | set(rankMap2.keys()))
-    
-    # 4️⃣ Loop over keys and calculate max diff
+
+    # 4️⃣ Loop and compute max absolute CDF difference
     linfSimple = 0.0
     table = []
-    
+
     for key in combined_keys:
-        cdf1 = rankMap1.get(key, max((r for v, r in rankMap1.items() if v < key), default=0)) / n
-        cdf2 = rankMap2.get(key, max((r for v, r in rankMap2.items() if v < key), default=0)) / m
+        # getRank(key, rankMap) → if key in map, rankMap[key]
+        #   else highest rank for values < key (default = 0 if none)
+        r1 = rankMap1.get(key, max((r for v, r in rankMap1.items() if v < key), default=0))
+        r2 = rankMap2.get(key, max((r for v, r in rankMap2.items() if v < key), default=0))
+
+        cdf1 = r1 / n
+        cdf2 = r2 / m
         diff = abs(cdf1 - cdf2)
+
         table.append((key, cdf1, cdf2, diff))
-        linfSimple = max(linfSimple, diff)
-    
-    # 5️⃣ Debug table option
+        if diff > linfSimple:
+            linfSimple = diff
+
+    # 5️⃣ Optional debug – full CDF table
     if debug:
         print(f"{'Value':>12} {'CDF1':>10} {'CDF2':>10} {'AbsDiff':>10}")
         for v, c1, c2, d in table:
-            print(f"{v:>12.2f} {c1:>10.4f} {c2:>10.4f} {d:>10.4f}")
-    
-    # 6️⃣ Get value where max diff occurs
-    max_row = max(table, key=lambda x: x[3])
-    return linfSimple, max_row[0]
+            print(f"{v:>12.6g} {c1:>10.4f} {c2:>10.4f} {d:>10.4f}")
+
+    # Return just like Deequ with correctForLowNumberOfSamples = true
+    return linfSimple
 
 
-# 🟢 Example usage on your actual data
-# Replace below with your real data_x and data_y
-# (Assuming already loaded DataFrames)
-max_diff, at_value = numerical_distance(
-    data_x, 'PFG_TNR_MO',
-    data_y, 'PFG_TNR_MO',
-    debug=True  # Set to True to see full table
-)
+# =====================
+# 🔹 Example usage with your datasets:
+# data_x -> vertical (12 months per ID)
+# data_y -> single month per ID
+# =====================
 
-print(f"\n✅ Max CDF difference = {max_diff:.6f} at value {at_value}")
+# Example dummy data (replace with actual):
+data_x = pd.DataFrame({
+    'BUSN_ACNT_ID': ['E1']*3 + ['E2']*3 + ['E3']*3,
+    'MO_END_DT': ['2025-01','2025-02','2025-03']*3,
+    'PFG_TNR_MO': [3000, 3100, 3200,
+                   4000, 4100, 4150,
+                   5000, 5050, 5100]
+})
+
+data_y = pd.DataFrame({
+    'ACNT_ID': ['E1', 'E2', 'E3'],
+    'PFG_TNR_MO': [3200, 4150, 5100]
+})
+
+# Run the exact method (no low-sample correction)
+distance = numerical_distance_exact(data_x, 'PFG_TNR_MO', data_y, 'PFG_TNR_MO', debug=True)
+print(f"\n✅ Exact numerical distance (KS statistic) = {distance:.6f}")
