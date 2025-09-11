@@ -1,0 +1,98 @@
+import random
+
+class SimpleBandit:
+    def __init__(self):
+        # We have 3 ice cream flavors (our "arms")
+        self.flavors = ["Chocolate", "Vanilla", "Strawberry"]
+        
+        # Keep track of how many times we recommended each flavor
+        self.flavor_counts = {"Chocolate": 0, "Vanilla": 0, "Strawberry": 0}
+        
+        # Keep track of how many people liked each flavor
+        self.flavor_likes = {"Chocolate": 0, "Vanilla": 0, "Strawberry": 0}
+        
+        # How much we explore vs exploit (0.1 means 10% random exploration)
+        self.explore_rate = 0.1
+    
+    def choose_flavor(self, person_age):
+        """Choose which ice cream flavor to recommend based on person's age"""
+        
+        # 10% of the time, pick randomly to try new things (exploration)
+        if random.random() < self.explore_rate:
+            chosen_flavor = random.choice(self.flavors)
+            print(f"🎲 Exploring: recommending {chosen_flavor}")
+        else:
+            # Otherwise, pick the flavor that worked best for this age group (exploitation)
+            best_flavor = self._find_best_flavor_for_age(person_age)
+            chosen_flavor = best_flavor
+            print(f"🎯 Exploiting: recommending {chosen_flavor}")
+        
+        return chosen_flavor
+    
+    def _find_best_flavor_for_age(self, age):
+        """Find which flavor has the highest success rate"""
+        best_flavor = "Chocolate"  # default
+        best_rate = 0
+        
+        for flavor in self.flavors:
+            if self.flavor_counts[flavor] > 0:
+                success_rate = self.flavor_likes[flavor] / self.flavor_counts[flavor]
+                if success_rate > best_rate:
+                    best_rate = success_rate
+                    best_flavor = flavor
+        
+        return best_flavor
+    
+    def give_feedback(self, flavor, liked_it):
+        """Tell the bandit if the person liked the recommendation"""
+        self.flavor_counts[flavor] += 1
+        if liked_it:
+            self.flavor_likes[flavor] += 1
+            print(f"😊 They liked {flavor}!")
+        else:
+            print(f"😞 They didn't like {flavor}")
+    
+    def show_stats(self):
+        """Show how well each flavor is doing"""
+        print("\n📊 Ice Cream Stats:")
+        for flavor in self.flavors:
+            if self.flavor_counts[flavor] > 0:
+                rate = self.flavor_likes[flavor] / self.flavor_counts[flavor]
+                print(f"{flavor}: {rate:.1%} liked it ({self.flavor_likes[flavor]}/{self.flavor_counts[flavor]})")
+            else:
+                print(f"{flavor}: No data yet")
+
+
+# Let's test our bandit!
+if __name__ == "__main__":
+    bandit = SimpleBandit()
+    
+    # Simulate some customers
+    customers = [
+        {"age": 8, "name": "Kid"},
+        {"age": 25, "name": "Adult"}, 
+        {"age": 12, "name": "Teen"},
+        {"age": 30, "name": "Adult2"},
+        {"age": 10, "name": "Kid2"}
+    ]
+    
+    print("🍦 Welcome to the Smart Ice Cream Shop! 🍦\n")
+    
+    for customer in customers:
+        print(f"\n👤 Customer: {customer['name']} (age {customer['age']})")
+        
+        # Get recommendation
+        recommendation = bandit.choose_flavor(customer["age"])
+        
+        # Simulate if they liked it (in real life, you'd ask them!)
+        # Let's say kids like chocolate more, adults like vanilla more
+        if customer["age"] < 15:
+            liked = recommendation == "Chocolate" and random.random() < 0.8
+        else:
+            liked = recommendation == "Vanilla" and random.random() < 0.8
+        
+        # Give feedback to the bandit
+        bandit.give_feedback(recommendation, liked)
+    
+    # Show final stats
+    bandit.show_stats()
