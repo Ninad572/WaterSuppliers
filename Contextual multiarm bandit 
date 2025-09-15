@@ -114,3 +114,39 @@ if __name__ == "__main__":
     
     random_policy_reward = np.sum([np.random.binomial(1, true_ctrs.iloc[i, np.random.randint(num_arms)]) for i in range(num_rows)])
     print(f"\nRandom Policy (Baseline) Total Reward: {random_policy_reward}")
+
+
+
+import matplotlib.pyplot as plt
+import collections
+
+# === After running run_simulation ===
+
+# 1. Plot cumulative reward
+plt.figure(figsize=(10, 5))
+plt.plot(reward_history, label="Cumulative Reward", linewidth=2)
+plt.xlabel("Iteration")
+plt.ylabel("Cumulative Reward")
+plt.title("Cumulative Reward Over Time")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# 2. Plot cumulative regret
+plt.figure(figsize=(10, 5))
+plt.plot(regret_history, label="Cumulative Regret", color="red", linewidth=2)
+plt.xlabel("Iteration")
+plt.ylabel("Cumulative Regret")
+plt.title("Cumulative Regret Over Time")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# 3. Plot arm selection counts
+arm_counts = collections.Counter(chosen_arms)
+plt.figure(figsize=(6, 5))
+plt.bar(arm_counts.keys(), arm_counts.values(), color="orange")
+plt.xlabel("Arm")
+plt.ylabel("Times Selected")
+plt.title("Arm Selection Distribution")
+plt.show()
