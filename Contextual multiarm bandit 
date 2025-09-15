@@ -1,98 +1,188 @@
-import random
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from keras import layers
 
-class SimpleBandit:
-    def __init__(self):
-        # We have 3 ice cream flavors (our "arms")
-        self.flavors = ["Chocolate", "Vanilla", "Strawberry"]
-        
-        # Keep track of how many times we recommended each flavor
-        self.flavor_counts = {"Chocolate": 0, "Vanilla": 0, "Strawberry": 0}
-        
-        # Keep track of how many people liked each flavor
-        self.flavor_likes = {"Chocolate": 0, "Vanilla": 0, "Strawberry": 0}
-        
-        # How much we explore vs exploit (0.1 means 10% random exploration)
-        self.explore_rate = 0.1
-    
-    def choose_flavor(self, person_age):
-        """Choose which ice cream flavor to recommend based on person's age"""
-        
-        # 10% of the time, pick randomly to try new things (exploration)
-        if random.random() < self.explore_rate:
-            chosen_flavor = random.choice(self.flavors)
-            print(f"🎲 Exploring: recommending {chosen_flavor}")
-        else:
-            # Otherwise, pick the flavor that worked best for this age group (exploitation)
-            best_flavor = self._find_best_flavor_for_age(person_age)
-            chosen_flavor = best_flavor
-            print(f"🎯 Exploiting: recommending {chosen_flavor}")
-        
-        return chosen_flavor
-    
-    def _find_best_flavor_for_age(self, age):
-        """Find which flavor has the highest success rate"""
-        best_flavor = "Chocolate"  # default
-        best_rate = 0
-        
-        for flavor in self.flavors:
-            if self.flavor_counts[flavor] > 0:
-                success_rate = self.flavor_likes[flavor] / self.flavor_counts[flavor]
-                if success_rate > best_rate:
-                    best_rate = success_rate
-                    best_flavor = flavor
-        
-        return best_flavor
-    
-    def give_feedback(self, flavor, liked_it):
-        """Tell the bandit if the person liked the recommendation"""
-        self.flavor_counts[flavor] += 1
-        if liked_it:
-            self.flavor_likes[flavor] += 1
-            print(f"😊 They liked {flavor}!")
-        else:
-            print(f"😞 They didn't like {flavor}")
-    
-    def show_stats(self):
-        """Show how well each flavor is doing"""
-        print("\n📊 Ice Cream Stats:")
-        for flavor in self.flavors:
-            if self.flavor_counts[flavor] > 0:
-                rate = self.flavor_likes[flavor] / self.flavor_counts[flavor]
-                print(f"{flavor}: {rate:.1%} liked it ({self.flavor_likes[flavor]}/{self.flavor_counts[flavor]})")
-            else:
-                print(f"{flavor}: No data yet")
+# --- 1. Data Generation and Preprocessing ---
+def create_synthetic_dataset(num_rows=100):
+    """
+    Creates a synthetic dataset to simulate a CMAB problem.
+    The data includes demographic/income features (context) and
+    a hidden click propensity for 3 email campaigns (arms).
+    """
+    np.random.seed(42)
+    data = {
+        'participant_id': range(num_rows),
+        'income': np.random.normal(loc=60000, scale=15000, size=num_rows).astype(int),
+        'gender': np.random.choice(['Male', 'Female'], num_rows),
+        'region': np.random.choice(, num_rows),
+    }
+    df = pd.DataFrame(data)
 
+    # Define a hidden reward function for each email campaign (arm)
+    # The 'ground truth' is a non-linear combination of features
+    def true_ctr_arm_0(row):
+        return 0.1 + (row['income'] / 150000) * 0.4 + (1 if row['gender'] == 'Male' and row['region'] == 'North' else 0) * 0.2
+    
+    def true_ctr_arm_1(row):
+        return 0.1 + (row['income'] / 200000) * 0.3 + (1 if row['gender'] == 'Female' and row['region'] == 'South' else 0) * 0.3
+    
+    def true_ctr_arm_2(row):
+        return 0.1 + (row['income'] / 100000) * 0.5 + (1 if row['region'] == 'West' else 0) * 0.1
 
-# Let's test our bandit!
+    df['true_ctr_arm_0'] = df.apply(true_ctr_arm_0, axis=1).clip(0, 1)
+    df['true_ctr_arm_1'] = df.apply(true_ctr_arm_1, axis=1).clip(0, 1)
+    df['true_ctr_arm_2'] = df.apply(true_ctr_arm_2, axis=1).clip(0, 1)
+    
+    return df
+
+def preprocess_data(df):
+    """
+    Preprocesses the raw data for the neural network.
+    It performs one-hot encoding on categorical features and normalizes
+    numerical features.
+    """
+    # Create one-hot encoded columns for categorical features
+    df_encoded = pd.get_dummies(df, columns=['gender', 'region'], dtype=int)
+    
+    # Normalize the 'income' feature to be between 0 and 1
+    df_encoded['income'] = (df_encoded['income'] - df_encoded['income'].min()) / (df_encoded['income'].max() - df_encoded['income'].min())
+    
+    # Isolate context features and the 'true' CTRs for simulation
+    context_features = df_encoded.drop(columns=['participant_id', 'true_ctr_arm_0', 'true_ctr_arm_1', 'true_ctr_arm_2'])
+    true_ctrs = df_encoded[['true_ctr_arm_0', 'true_ctr_arm_1', 'true_ctr_arm_2']]
+    
+    return context_features, true_ctrs
+
+# --- 2. Neural Network Architecture ---
+def build_cmab_model(input_dim, num_arms):
+    """
+    Builds a simple Keras Sequential model for the CMAB agent.
+    
+    Input:
+    - input_dim: The number of features in the context vector.
+    - num_arms: The number of available actions (email campaigns).
+    
+    The model takes a context vector and outputs a predicted reward
+    for each arm.
+    """
+    model = keras.Sequential()
+    return model
+
+# --- 3. Epsilon-Greedy Policy ---
+def epsilon_greedy_policy(model, context, epsilon):
+    """
+    Implements the epsilon-greedy exploration-exploitation strategy.
+    
+    It makes a decision based on a random number and the model's predictions.
+    
+    Input:
+    - model: The Keras neural network.
+    - context: The current preprocessed context vector.
+    - epsilon: The probability of exploration.
+    
+    Returns:
+    - The chosen action index (0, 1, or 2).
+    """
+    # Generate a random number between 0 and 1
+    if np.random.rand() < epsilon:
+        # Explore: choose a random action
+        return np.random.randint(num_arms)
+    else:
+        # Exploit: choose the action with the highest predicted reward
+        # The model's predictions have a shape of (1, num_arms). We need to get the index.
+        predicted_rewards = model(context)
+        return tf.argmax(predicted_rewards, axis=1).numpy()
+
+# --- 4. Main Training and Simulation Loop ---
+def run_simulation(context_features, true_ctrs, model, optimizer, num_iterations=100):
+    """
+    Runs the online learning simulation.
+    
+    The model processes one context at a time, makes a decision,
+    observes a reward, and updates its weights.
+    """
+    num_arms = true_ctrs.shape
+    cumulative_reward = 0
+    
+    print("Starting CMAB simulation...")
+    print("----------------------------")
+    
+    for i in range(num_iterations):
+        # Get the current context (input to the model)
+        # Ensure the tensor has the correct shape for the model: (1, num_features)
+        context = tf.constant(context_features.iloc[i:i+1].values, dtype=tf.float32)
+        
+        # Determine the current epsilon value (decreasing over time)
+        # A simple decay strategy: epsilon = 1 / (iteration + 1)
+        epsilon = 1.0 / (i + 1)
+
+        # Predict the expected rewards for all arms based on the context
+        predicted_rewards = model(context)  # Shape: (1, 3)
+        
+        # Choose an action based on the epsilon-greedy policy
+        chosen_action = epsilon_greedy_policy(model, context, epsilon)
+        
+        # Simulate observing the reward for the chosen action only
+        # The reward is binary: 1 for click, 0 for no click
+        true_ctr = true_ctrs.iloc[i, chosen_action]
+        reward = np.random.binomial(1, true_ctr) # Bernoulli trial
+        
+        # Construct the custom target vector for the loss function
+        # The loss will only be calculated for the chosen action
+        with tf.GradientTape() as tape:
+            # Re-predict rewards inside the tape scope to watch variables
+            predictions = model(context)
+            
+            # Create the custom target vector
+            # It starts as a copy of the model's predictions
+            custom_target = tf.identity(predictions)
+            
+            # The target for the chosen arm is the observed reward
+            # This is a key step to implement the partial feedback loss
+            chosen_action_one_hot = tf.one_hot([chosen_action], num_arms, dtype=tf.float32)
+            # The custom target is a blend: predictions for unchosen, and reward for chosen
+            custom_target = custom_target * (1 - chosen_action_one_hot) + (reward * chosen_action_one_hot)
+            
+            # Compute the Mean Squared Error (MSE) loss
+            loss = keras.losses.mean_squared_error(custom_target, predictions)
+            
+        # Compute gradients and apply the update
+        gradients = tape.gradient(loss, model.trainable_weights)
+        optimizer.apply_gradients(zip(gradients, model.trainable_weights))
+        
+        # Update and print cumulative reward for monitoring
+        cumulative_reward += reward
+        
+        print(f"Iteration {i+1}: Action Chosen: {chosen_action}, Reward: {reward}, Cumulative Reward: {cumulative_reward}, Epsilon: {epsilon:.2f}")
+
+    print("----------------------------")
+    print(f"Simulation finished. Total cumulative reward: {cumulative_reward}")
+    return cumulative_reward
+
+# Main execution block
 if __name__ == "__main__":
-    bandit = SimpleBandit()
+    # Parameters
+    num_rows = 100
+    num_arms = 3
     
-    # Simulate some customers
-    customers = [
-        {"age": 8, "name": "Kid"},
-        {"age": 25, "name": "Adult"}, 
-        {"age": 12, "name": "Teen"},
-        {"age": 30, "name": "Adult2"},
-        {"age": 10, "name": "Kid2"}
-    ]
+    # Create and preprocess data
+    raw_df = create_synthetic_dataset(num_rows)
+    context_features, true_ctrs = preprocess_data(raw_df)
     
-    print("🍦 Welcome to the Smart Ice Cream Shop! 🍦\n")
+    # Determine input dimension from the preprocessed data
+    input_dim = context_features.shape
     
-    for customer in customers:
-        print(f"\n👤 Customer: {customer['name']} (age {customer['age']})")
-        
-        # Get recommendation
-        recommendation = bandit.choose_flavor(customer["age"])
-        
-        # Simulate if they liked it (in real life, you'd ask them!)
-        # Let's say kids like chocolate more, adults like vanilla more
-        if customer["age"] < 15:
-            liked = recommendation == "Chocolate" and random.random() < 0.8
-        else:
-            liked = recommendation == "Vanilla" and random.random() < 0.8
-        
-        # Give feedback to the bandit
-        bandit.give_feedback(recommendation, liked)
+    # Build and compile the model
+    cmab_model = build_cmab_model(input_dim, num_arms)
     
-    # Show final stats
-    bandit.show_stats()
+    # Use Adam optimizer
+    optimizer = keras.optimizers.Adam(learning_rate=0.01)
+    
+    # Run the simulation with the CMAB agent
+    final_reward_cmab = run_simulation(context_features, true_ctrs, cmab_model, optimizer, num_rows)
+    
+    # Optional: Compare against a random baseline
+    random_policy_reward = np.sum([np.random.binomial(1, true_ctrs.iloc[i, np.random.randint(num_arms)]) for i in range(num_rows)])
+    print(f"\nRandom Policy (Baseline) Total Reward: {random_policy_reward}")
