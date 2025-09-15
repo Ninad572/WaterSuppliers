@@ -1,188 +1,279 @@
-import pandas as pd
+"""
+CMAB (Contextual Multi-Armed Bandit) simulation using a simple neural network agent.
+- Creates a synthetic dataset (context features + true CTRs for 3 arms).
+- Preprocesses data (one-hot + normalization).
+- Builds a small Keras model that predicts expected reward per arm.
+- Uses an epsilon-greedy policy to choose actions online.
+- Updates the model using partial-feedback (only the chosen arm's observed reward).
+"""
+
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
-from keras import layers
+from tensorflow.keras import layers
 
-# --- 1. Data Generation and Preprocessing ---
-def create_synthetic_dataset(num_rows=100):
+# ========== 0. Reproducibility ==========
+# Set random seeds for reproducible results
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+
+# ========== 1. Data Generation and Preprocessing ==========
+
+def create_synthetic_dataset(num_rows: int = 100) -> pd.DataFrame:
     """
     Creates a synthetic dataset to simulate a CMAB problem.
     The data includes demographic/income features (context) and
-    a hidden click propensity for 3 email campaigns (arms).
+    a hidden click propensity (true CTR) for 3 email campaigns (arms).
     """
-    np.random.seed(42)
+    # numeric context (income), categorical context (gender, region), and an ID
     data = {
-        'participant_id': range(num_rows),
-        'income': np.random.normal(loc=60000, scale=15000, size=num_rows).astype(int),
-        'gender': np.random.choice(['Male', 'Female'], num_rows),
-        'region': np.random.choice(, num_rows),
+        "participant_id": np.arange(num_rows),
+        # income drawn from a normal distribution (make sure it's positive)
+        "income": np.maximum(1000, np.random.normal(loc=60000, scale=15000, size=num_rows)).astype(int),
+        # simple binary gender categories
+        "gender": np.random.choice(["Male", "Female"], size=num_rows),
+        # region must be specified (fixed bug in original code)
+        "region": np.random.choice(["North", "South", "East", "West"], size=num_rows),
     }
     df = pd.DataFrame(data)
 
-    # Define a hidden reward function for each email campaign (arm)
-    # The 'ground truth' is a non-linear combination of features
+    # Hidden (ground-truth) CTR functions for each arm (non-linear composition)
+    # Each returns a probability in [0, 1]
     def true_ctr_arm_0(row):
-        return 0.1 + (row['income'] / 150000) * 0.4 + (1 if row['gender'] == 'Male' and row['region'] == 'North' else 0) * 0.2
-    
-    def true_ctr_arm_1(row):
-        return 0.1 + (row['income'] / 200000) * 0.3 + (1 if row['gender'] == 'Female' and row['region'] == 'South' else 0) * 0.3
-    
-    def true_ctr_arm_2(row):
-        return 0.1 + (row['income'] / 100000) * 0.5 + (1 if row['region'] == 'West' else 0) * 0.1
+        base = 0.1
+        income_term = (row["income"] / 150000) * 0.4
+        bonus = 0.2 if (row["gender"] == "Male" and row["region"] == "North") else 0.0
+        return np.clip(base + income_term + bonus, 0.0, 1.0)
 
-    df['true_ctr_arm_0'] = df.apply(true_ctr_arm_0, axis=1).clip(0, 1)
-    df['true_ctr_arm_1'] = df.apply(true_ctr_arm_1, axis=1).clip(0, 1)
-    df['true_ctr_arm_2'] = df.apply(true_ctr_arm_2, axis=1).clip(0, 1)
-    
+    def true_ctr_arm_1(row):
+        base = 0.1
+        income_term = (row["income"] / 200000) * 0.3
+        bonus = 0.3 if (row["gender"] == "Female" and row["region"] == "South") else 0.0
+        return np.clip(base + income_term + bonus, 0.0, 1.0)
+
+    def true_ctr_arm_2(row):
+        base = 0.1
+        income_term = (row["income"] / 100000) * 0.5
+        bonus = 0.1 if (row["region"] == "West") else 0.0
+        return np.clip(base + income_term + bonus, 0.0, 1.0)
+
+    # Apply the functions row-wise to create 3 true CTR columns
+    df["true_ctr_arm_0"] = df.apply(true_ctr_arm_0, axis=1)
+    df["true_ctr_arm_1"] = df.apply(true_ctr_arm_1, axis=1)
+    df["true_ctr_arm_2"] = df.apply(true_ctr_arm_2, axis=1)
+
     return df
 
-def preprocess_data(df):
+
+def preprocess_data(df: pd.DataFrame):
     """
-    Preprocesses the raw data for the neural network.
-    It performs one-hot encoding on categorical features and normalizes
-    numerical features.
+    Preprocesses data for model input:
+    - One-hot encodes categorical features (gender, region).
+    - Normalizes numeric features (income) to [0,1].
+    - Returns:
+        context_features: DataFrame with only input features (floats).
+        true_ctrs: DataFrame with true CTRs for each arm.
     """
-    # Create one-hot encoded columns for categorical features
-    df_encoded = pd.get_dummies(df, columns=['gender', 'region'], dtype=int)
-    
-    # Normalize the 'income' feature to be between 0 and 1
-    df_encoded['income'] = (df_encoded['income'] - df_encoded['income'].min()) / (df_encoded['income'].max() - df_encoded['income'].min())
-    
-    # Isolate context features and the 'true' CTRs for simulation
-    context_features = df_encoded.drop(columns=['participant_id', 'true_ctr_arm_0', 'true_ctr_arm_1', 'true_ctr_arm_2'])
-    true_ctrs = df_encoded[['true_ctr_arm_0', 'true_ctr_arm_1', 'true_ctr_arm_2']]
-    
+    # One-hot encode categorical columns. dtype=float so model receives floats.
+    df_encoded = pd.get_dummies(df, columns=["gender", "region"], dtype=float)
+
+    # Normalize 'income' to [0,1] using min-max scaling
+    income_min = df_encoded["income"].min()
+    income_max = df_encoded["income"].max()
+    if income_max == income_min:
+        # avoid division by zero if constant column (unlikely here)
+        df_encoded["income"] = 0.0
+    else:
+        df_encoded["income"] = (df_encoded["income"] - income_min) / (income_max - income_min)
+
+    # Isolate context features (drop ID and the true CTR columns)
+    context_features = df_encoded.drop(columns=["participant_id", "true_ctr_arm_0", "true_ctr_arm_1", "true_ctr_arm_2"])
+
+    # Ensure the context features are floats (tensorflow expects numeric)
+    context_features = context_features.astype(np.float32)
+
+    # True CTRs: keep as floats
+    true_ctrs = df[["true_ctr_arm_0", "true_ctr_arm_1", "true_ctr_arm_2"]].astype(float)
+
     return context_features, true_ctrs
 
-# --- 2. Neural Network Architecture ---
-def build_cmab_model(input_dim, num_arms):
+
+# ========== 2. Neural Network Architecture ==========
+
+def build_cmab_model(input_dim: int, num_arms: int) -> keras.Model:
     """
-    Builds a simple Keras Sequential model for the CMAB agent.
-    
-    Input:
-    - input_dim: The number of features in the context vector.
-    - num_arms: The number of available actions (email campaigns).
-    
-    The model takes a context vector and outputs a predicted reward
-    for each arm.
+    Builds a small feed-forward neural network that maps a context vector
+    to predicted reward estimates (one value per arm).
+    - input_dim: number of features in the context vector
+    - num_arms: number of arms (3 in this script)
+    Returns an uncompiled tf.keras.Model (we'll update weights manually).
     """
-    model = keras.Sequential()
+    model = keras.Sequential(
+        [
+            layers.Input(shape=(input_dim,)),           # expects a 1D context vector
+            layers.Dense(64, activation="relu"),       # hidden layer (64 units)
+            layers.Dense(32, activation="relu"),       # hidden layer (32 units)
+            layers.Dense(num_arms, activation="linear")  # output: predicted reward per arm
+        ],
+        name="cmab_predictor"
+    )
     return model
 
-# --- 3. Epsilon-Greedy Policy ---
-def epsilon_greedy_policy(model, context, epsilon):
-    """
-    Implements the epsilon-greedy exploration-exploitation strategy.
-    
-    It makes a decision based on a random number and the model's predictions.
-    
-    Input:
-    - model: The Keras neural network.
-    - context: The current preprocessed context vector.
-    - epsilon: The probability of exploration.
-    
-    Returns:
-    - The chosen action index (0, 1, or 2).
-    """
-    # Generate a random number between 0 and 1
-    if np.random.rand() < epsilon:
-        # Explore: choose a random action
-        return np.random.randint(num_arms)
-    else:
-        # Exploit: choose the action with the highest predicted reward
-        # The model's predictions have a shape of (1, num_arms). We need to get the index.
-        predicted_rewards = model(context)
-        return tf.argmax(predicted_rewards, axis=1).numpy()
 
-# --- 4. Main Training and Simulation Loop ---
-def run_simulation(context_features, true_ctrs, model, optimizer, num_iterations=100):
+# ========== 3. Epsilon-Greedy Policy ==========
+
+def epsilon_greedy_policy(model: keras.Model, context: tf.Tensor, epsilon: float, num_arms: int) -> int:
     """
-    Runs the online learning simulation.
-    
-    The model processes one context at a time, makes a decision,
-    observes a reward, and updates its weights.
+    Given a model and a single context (shape (1, input_dim)), choose an action:
+    - with probability epsilon: pick a random action (exploration)
+    - otherwise: pick the action with the highest predicted reward (exploitation)
+    Returns the chosen action index as a Python int.
     """
-    num_arms = true_ctrs.shape
+    if np.random.rand() < epsilon:
+        # Explore: choose a random arm uniformly
+        return int(np.random.randint(num_arms))
+    else:
+        # Exploit: use the model's predictions
+        # call model with training=False to disable dropout/batchnorm updating (if any)
+        predicted = model(context, training=False)  # shape (1, num_arms)
+        # argmax along last axis, convert to Python int
+        return int(tf.argmax(predicted, axis=1).numpy()[0])
+
+
+# ========== 4. Main Training / Simulation Loop ==========
+
+def run_simulation(context_features: pd.DataFrame, true_ctrs: pd.DataFrame,
+                   model: keras.Model, optimizer: keras.optimizers.Optimizer,
+                   num_iterations: int = 100, verbose: bool = True) -> int:
+    """
+    Online simulation:
+    - Loops over contexts (one per iteration).
+    - Chooses an action using epsilon-greedy (epsilon decays over time).
+    - Observes a binary reward sampled from Bernoulli(true_ctr_for_chosen_action).
+    - Updates the model using the observed reward for only the chosen action
+      (partial feedback) via a custom MSE that affects only the chosen arm.
+    Returns cumulative reward collected across iterations.
+    """
+
+    # Defensive: number of arms from true_ctrs columns
+    num_arms = true_ctrs.shape[1]
+
+    # Defensive: can't iterate more than available contexts
+    max_rows = len(context_features)
+    n_iter = min(num_iterations, max_rows)
+
     cumulative_reward = 0
-    
-    print("Starting CMAB simulation...")
-    print("----------------------------")
-    
-    for i in range(num_iterations):
-        # Get the current context (input to the model)
-        # Ensure the tensor has the correct shape for the model: (1, num_features)
-        context = tf.constant(context_features.iloc[i:i+1].values, dtype=tf.float32)
-        
-        # Determine the current epsilon value (decreasing over time)
-        # A simple decay strategy: epsilon = 1 / (iteration + 1)
+
+    if verbose:
+        print("Starting CMAB simulation...")
+        print("----------------------------")
+
+    # Convert context_features to NumPy once for faster repeated access
+    # Keep track of feature names for clarity (not required)
+    feature_names = context_features.columns.tolist()
+    X = context_features.values.astype(np.float32)  # shape: (num_rows, input_dim)
+
+    for i in range(n_iter):
+        # Prepare current context as a batch of size 1 (shape (1, input_dim))
+        context = tf.constant(X[i:i + 1], dtype=tf.float32)
+
+        # Epsilon decay schedule (simple): epsilon = 1 / (iteration + 1)
         epsilon = 1.0 / (i + 1)
 
-        # Predict the expected rewards for all arms based on the context
-        predicted_rewards = model(context)  # Shape: (1, 3)
-        
-        # Choose an action based on the epsilon-greedy policy
-        chosen_action = epsilon_greedy_policy(model, context, epsilon)
-        
-        # Simulate observing the reward for the chosen action only
-        # The reward is binary: 1 for click, 0 for no click
-        true_ctr = true_ctrs.iloc[i, chosen_action]
-        reward = np.random.binomial(1, true_ctr) # Bernoulli trial
-        
-        # Construct the custom target vector for the loss function
-        # The loss will only be calculated for the chosen action
-        with tf.GradientTape() as tape:
-            # Re-predict rewards inside the tape scope to watch variables
-            predictions = model(context)
-            
-            # Create the custom target vector
-            # It starts as a copy of the model's predictions
-            custom_target = tf.identity(predictions)
-            
-            # The target for the chosen arm is the observed reward
-            # This is a key step to implement the partial feedback loss
-            chosen_action_one_hot = tf.one_hot([chosen_action], num_arms, dtype=tf.float32)
-            # The custom target is a blend: predictions for unchosen, and reward for chosen
-            custom_target = custom_target * (1 - chosen_action_one_hot) + (reward * chosen_action_one_hot)
-            
-            # Compute the Mean Squared Error (MSE) loss
-            loss = keras.losses.mean_squared_error(custom_target, predictions)
-            
-        # Compute gradients and apply the update
-        gradients = tape.gradient(loss, model.trainable_weights)
-        optimizer.apply_gradients(zip(gradients, model.trainable_weights))
-        
-        # Update and print cumulative reward for monitoring
-        cumulative_reward += reward
-        
-        print(f"Iteration {i+1}: Action Chosen: {chosen_action}, Reward: {reward}, Cumulative Reward: {cumulative_reward}, Epsilon: {epsilon:.2f}")
+        # Choose action using epsilon-greedy
+        chosen_action = epsilon_greedy_policy(model, context, epsilon, num_arms)
 
-    print("----------------------------")
-    print(f"Simulation finished. Total cumulative reward: {cumulative_reward}")
+        # Observe true CTR for that participant and chosen arm
+        # true_ctrs is a DataFrame: use .iloc[row_index, col_index]
+        true_ctr = float(true_ctrs.iloc[i, chosen_action])
+
+        # Sample a binary reward: 1 with probability true_ctr, else 0
+        reward = int(np.random.binomial(1, true_ctr))
+
+        # Build a custom target where only the chosen arm's target is set to the observed reward,
+        # while other arms' targets are equal to the model's current predictions (so they do not
+        # contribute to the loss / gradient).
+        with tf.GradientTape() as tape:
+            # Forward pass (training=True so layers like dropout behave consistently if present)
+            predictions = model(context, training=True)  # shape (1, num_arms)
+
+            # One-hot for the chosen action, shape (1, num_arms)
+            chosen_one_hot = tf.one_hot([chosen_action], num_arms, dtype=tf.float32)
+
+            # Build custom target:
+            # - For unchosen arms: keep the model's original prediction
+            # - For chosen arm: replace with the observed reward (0 or 1)
+            reward_tensor = tf.cast(reward, tf.float32)
+            custom_target = predictions * (1.0 - chosen_one_hot) + reward_tensor * chosen_one_hot
+
+            # Mean Squared Error (MSE) loss between target and predictions
+            # This will produce gradients only for parameters that influenced the chosen arm output.
+            loss = tf.reduce_mean(tf.square(custom_target - predictions))
+
+        # Compute gradients w.r.t. model's trainable variables
+        gradients = tape.gradient(loss, model.trainable_variables)
+
+        # Filter out None gradients (can happen in some edge cases)
+        grads_and_vars = [(g, v) for g, v in zip(gradients, model.trainable_variables) if g is not None]
+
+        # Apply gradients via the provided optimizer
+        if grads_and_vars:
+            optimizer.apply_gradients(grads_and_vars)
+
+        # Update cumulative reward
+        cumulative_reward += reward
+
+        if verbose:
+            # Print useful debugging/monitoring information
+            print(f"Iter {i+1}/{n_iter} | Epsilon: {epsilon:.3f} | Chosen Arm: {chosen_action} "
+                  f"| True CTR: {true_ctr:.3f} | Reward: {reward} | Cumulative: {cumulative_reward} | Loss: {loss.numpy():.6f}")
+
+    if verbose:
+        print("----------------------------")
+        print(f"Simulation finished. Total cumulative reward: {cumulative_reward}")
+
     return cumulative_reward
 
-# Main execution block
+
+# ========== 5. Main Execution Block ==========
 if __name__ == "__main__":
     # Parameters
-    num_rows = 100
-    num_arms = 3
-    
+    num_rows = 100            # number of synthetic participants
+    num_arms = 3              # number of email campaigns / arms
+    learning_rate = 0.01      # optimizer learning rate
+    num_iterations = num_rows # run one iteration per participant
+
     # Create and preprocess data
-    raw_df = create_synthetic_dataset(num_rows)
+    raw_df = create_synthetic_dataset(num_rows=num_rows)
     context_features, true_ctrs = preprocess_data(raw_df)
-    
-    # Determine input dimension from the preprocessed data
-    input_dim = context_features.shape
-    
-    # Build and compile the model
-    cmab_model = build_cmab_model(input_dim, num_arms)
-    
-    # Use Adam optimizer
-    optimizer = keras.optimizers.Adam(learning_rate=0.01)
-    
-    # Run the simulation with the CMAB agent
-    final_reward_cmab = run_simulation(context_features, true_ctrs, cmab_model, optimizer, num_rows)
-    
-    # Optional: Compare against a random baseline
-    random_policy_reward = np.sum([np.random.binomial(1, true_ctrs.iloc[i, np.random.randint(num_arms)]) for i in range(num_rows)])
-    print(f"\nRandom Policy (Baseline) Total Reward: {random_policy_reward}")
+
+    # Determine model input size (number of features)
+    input_dim = context_features.shape[1]  # FIXED: previously incorrectly used .shape (tuple)
+
+    # Build model
+    cmab_model = build_cmab_model(input_dim=input_dim, num_arms=num_arms)
+
+    # Initialize optimizer (we manually update weights using GradientTape)
+    optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
+
+    # Optional: (debug) show first few contexts and their corresponding true CTRs
+    print("Sample preprocessed context (first 3 rows):")
+    print(context_features.head(3))
+    print("\nCorresponding true CTRs (first 3 rows):")
+    print(true_ctrs.head(3))
+    print("\nBuilding model and running simulation...\n")
+
+    # Run the online CMAB simulation
+    final_cumulative_reward = run_simulation(context_features, true_ctrs, cmab_model, optimizer,
+                                            num_iterations=num_iterations, verbose=True)
+
+    # Baseline: random policy cumulative reward (for comparison)
+    rng = np.random.default_rng(SEED)  # use numpy Generator for reproducibility
+    random_rewards = [rng.binomial(1, true_ctrs.iloc[i, rng.integers(low=0, high=num_arms)]) for i in range(num_rows)]
+    random_policy_reward = int(np.sum(random_rewards))
+
+    print(f"\nCMAB Agent Total Reward: {final_cumulative_reward}")
+    print(f"Random Policy (Baseline) Total Reward: {random_policy_reward}")
