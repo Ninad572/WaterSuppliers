@@ -1,0 +1,93 @@
+import numpy as np import pandas as pd import matplotlib.pyplot as plt
+
+========== 0. Reproducibility ==========
+
+SEED = 42 np.random.seed(SEED)
+
+========== 1. Data Generation and Preprocessing ==========
+
+def create_synthetic_dataset(num_rows: int = 100) -> pd.DataFrame: data = { "participant_id": np.arange(num_rows), "income": np.maximum(1000, np.random.normal(loc=60000, scale=15000, size=num_rows)).astype(int), "gender": np.random.choice(["Male", "Female"], size=num_rows), "region": np.random.choice(["North", "South", "East", "West"], size=num_rows), } df = pd.DataFrame(data)
+
+def true_ctr_arm_0(row):
+    base = 0.1
+    income_term = (row["income"] / 150000) * 0.4
+    bonus = 0.2 if (row["gender"] == "Male" and row["region"] == "North") else 0.0
+    return np.clip(base + income_term + bonus, 0.0, 1.0)
+
+def true_ctr_arm_1(row):
+    base = 0.1
+    income_term = (row["income"] / 200000) * 0.3
+    bonus = 0.3 if (row["gender"] == "Female" and row["region"] == "South") else 0.0
+    return np.clip(base + income_term + bonus, 0.0, 1.0)
+
+def true_ctr_arm_2(row):
+    base = 0.1
+    income_term = (row["income"] / 100000) * 0.5
+    bonus = 0.1 if (row["region"] == "West") else 0.0
+    return np.clip(base + income_term + bonus, 0.0, 1.0)
+
+df["true_ctr_arm_0"] = df.apply(true_ctr_arm_0, axis=1)
+df["true_ctr_arm_1"] = df.apply(true_ctr_arm_1, axis=1)
+df["true_ctr_arm_2"] = df.apply(true_ctr_arm_2, axis=1)
+
+return df
+
+========== 2. A/B Testing Policy ==========
+
+def ab_testing_policy(i, num_arms): return i % num_arms  # cycle evenly through arms
+
+========== 3. Run Simulation ==========
+
+def run_ab_testing(df, num_arms=3): rewards = [] chosen_arms = [] oracle_rewards = [] random_rewards = []
+
+for i in range(len(df)):
+    # --- Choose action with A/B testing ---
+    chosen_arm = ab_testing_policy(i, num_arms)
+    chosen_arms.append(chosen_arm)
+
+    # --- True CTR for chosen arm ---
+    true_ctr = df.iloc[i, df.columns.get_loc(f"true_ctr_arm_{chosen_arm}")]
+    reward = np.random.binomial(1, true_ctr)
+    rewards.append(reward)
+
+    # --- Oracle reward (best arm for this participant) ---
+    best_ctr = df[["true_ctr_arm_0", "true_ctr_arm_1", "true_ctr_arm_2"]].iloc[i].max()
+    oracle_rewards.append(np.random.binomial(1, best_ctr))
+
+    # --- Random policy reward ---
+    rand_arm = np.random.randint(num_arms)
+    rand_ctr = df.iloc[i, df.columns.get_loc(f"true_ctr_arm_{rand_arm}")]
+    random_rewards.append(np.random.binomial(1, rand_ctr))
+
+return np.array(rewards), np.array(oracle_rewards), np.array(random_rewards), np.array(chosen_arms)
+
+========== 4. Visualization ==========
+
+def plot_results(rewards, oracle_rewards, random_rewards, chosen_arms, num_arms): cum_rewards = np.cumsum(rewards) cum_oracle = np.cumsum(oracle_rewards) cum_random = np.cumsum(random_rewards) regret = cum_oracle - cum_rewards
+
+plt.figure(figsize=(15, 4))
+
+# --- Plot 1: Cumulative Reward ---
+plt.subplot(1, 3, 1)
+plt.plot(cum_rewards, label="A/B Testing")
+plt.plot(cum_oracle, label="Oracle")
+plt.plot(cum_random, label="Random")
+plt.xlabel("Iteration")
+plt.ylabel("Cumulative Reward")
+plt.title("Cumulative Reward")
+plt.legend()
+
+# --- Plot 2: Regret ---
+plt.subplot(1, 3, 2)
+plt.plot(regret, label="Regret (Oracle - A/B)")
+plt.xlabel("Iteration")
+plt.ylabel("Regret")
+plt.title("Regret Curve")
+plt.legend()
+
+# --- Plot 3: Arm Choices ---
+plt.subplot(1, 3, 3)
+counts = [np.sum(chosen_arms == a) for a in range(num_arms)]
+plt.bar(range(num_arms), counts)
+plt.xlabel("Arm")
+
