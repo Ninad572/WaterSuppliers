@@ -1,83 +1,35 @@
-import pandas as pd
-import numpy as np
+Create a complete Jupyter Notebook (.ipynb) for an end-to-end MiniBatchKMeans segmentation pipeline.
 
-# ----------------------------
-# Step 1 — Load / prepare your datasets
-# ----------------------------
-# Example: Dataset 1 ("vertical" – multiple months per ID)
-data_x = pd.DataFrame({
-    'BUSN_ACNT_ID': ['E1']*3 + ['E2']*3 + ['E3']*3,
-    'MO_END_DT': ['2025-01', '2025-02', '2025-03']*3,
-    'PFG_TNR_MO': [3000, 3100, 3200,
-                   4000, 4100, 4150,
-                   5000, 5050, 5100]
-})
+Requirements:
+- Dataset name: df (assume I already loaded it or I will replace the read_csv path)
+- Dataset size: ~10M rows, 60–70 mixed numeric and categorical features
+- Steps required in the notebook:
+  1. Import all necessary libraries (pandas, numpy, sklearn, matplotlib)
+  2. Load dataset into df (with a placeholder path I can change)
+  3. Automatically detect numeric and categorical columns
+  4. Split categoricals into low-cardinality and high-cardinality
+  5. Preprocessing:
+        - Numeric: median imputation + StandardScaler
+        - Low-card categoricals: most_frequent impute + OneHotEncoder
+        - High-card categoricals: frequency encoding
+  6. Build a ColumnTransformer
+  7. Take a sample (up to 1M rows) for fitting
+  8. Apply dimensionality reduction using TruncatedSVD (20–40 components)
+  9. Try different k values (4 to 10) for MiniBatchKMeans and compute silhouette scores
+ 10. Plot silhouette score vs k
+ 11. Fit final MiniBatchKMeans using the chosen k
+ 12. Transform FULL dataset → embeddings → predict segment labels
+ 13. Add SEGMENT_ID column to df
+ 14. Visualize clusters using 2D PCA plot
+ 15. Show segment size distribution (bar plot)
+ 16. Do basic segment profiling (means of numeric features)
+ 17. Save models (preprocessor, SVD, KMeans) using joblib
+ 18. Provide a scoring function that assigns segments to new data
 
-# Example: Dataset 2 (single month per ID)
-data_y = pd.DataFrame({
-    'ACNT_ID': ['E1', 'E2', 'E3'],
-    'PFG_TNR_MO': [3200, 4150, 5100]
-})
+Notebook formatting rules:
+- Use clear Markdown headings for each step
+- Include explanations where useful
+- Include all code needed to run end-to-end
+- No placeholders except the CSV file path
 
-# ----------------------------
-# Step 2 — Extract just the numeric values
-# ----------------------------
-vals1 = pd.to_numeric(data_x['PFG_TNR_MO'], errors='coerce').dropna().astype(float).values
-vals2 = pd.to_numeric(data_y['PFG_TNR_MO'], errors='coerce').dropna().astype(float).values
-
-# ----------------------------
-# Step 3 — Sort both datasets
-# ----------------------------
-vals1.sort()
-vals2.sort()
-
-n = len(vals1)  # total observations in dataset 1
-m = len(vals2)  # total observations in dataset 2
-
-# ----------------------------
-# Step 4 — Get unique values & counts
-# ----------------------------
-u1, c1 = np.unique(vals1, return_counts=True)
-u2, c2 = np.unique(vals2, return_counts=True)
-
-# ----------------------------
-# Step 5 — Cumulative counts → CDF steps
-# ----------------------------
-cdf1_steps = np.cumsum(c1) / n
-cdf2_steps = np.cumsum(c2) / m
-
-# ----------------------------
-# Step 6 — Union of all unique values
-# ----------------------------
-all_vals = np.union1d(u1, u2)
-
-# ----------------------------
-# Step 7 — For each value in union, get CDF from both datasets
-# ----------------------------
-idx1 = np.searchsorted(u1, all_vals, side='right') - 1
-idx2 = np.searchsorted(u2, all_vals, side='right') - 1
-
-cdf1 = np.where(idx1 >= 0, cdf1_steps[idx1], 0.0)
-cdf2 = np.where(idx2 >= 0, cdf2_steps[idx2], 0.0)
-
-# ----------------------------
-# Step 8 — Compute absolute differences
-# ----------------------------
-diffs = np.abs(cdf1 - cdf2)
-
-# ----------------------------
-# Step 9 — Find the maximum difference & the value where it occurs
-# ----------------------------
-max_idx = np.argmax(diffs)
-max_diff = diffs[max_idx]
-max_val = all_vals[max_idx]
-
-# ----------------------------
-# Step 10 — Output
-# ----------------------------
-print("=== CDF Comparison Table ===")
-print(f"{'Value':>10}  {'CDF1':>10}  {'CDF2':>10}  {'AbsDiff':>10}")
-for v, c1, c2, d in zip(all_vals, cdf1, cdf2, diffs):
-    print(f"{v:>10.0f}  {c1:>10.4f}  {c2:>10.4f}  {d:>10.4f}")
-
-print(f"\nMax CDF difference = {max_diff:.4f} at value {max_val}")
+Generate only the notebook cells (Markdown + Code) in correct order so I can paste directly into Jupyter.
