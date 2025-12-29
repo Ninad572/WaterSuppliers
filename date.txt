@@ -1,130 +1,110 @@
-# pip install pandas datasketches numpy
-import pandas as pd
+# ============================
+# ORDINAL REGRESSION USING XGBOOST (70-30 SPLIT)
+# ============================
+
 import numpy as np
-from datasketches import kll_floats_sketch
+import pandas as pd
 
-# --------------------------------------------------------
-# Helper: QuantileNonSample class to wrap KLL and ranks
-# --------------------------------------------------------
-class QuantileNonSample:
-    def __init__(self, values, k=200):
-        self.sketch = kll_floats_sketch(k)
-        cnt = 0
-        for v in values:
-            if pd.notna(v):
-                self.sketch.update(float(v))
-                cnt += 1
-        self.n = cnt
+from xgboost import XGBRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, cohen_kappa_score
 
-    def is_empty(self):
-        return self.n == 0
+# ----------------------------
+# 1. INPUT DATA
+# ----------------------------
+# Assumptions:
+# - df is your dataframe
+# - TARGET column contains ordinal values (a–h)
+# - Feature preprocessing already done
 
-    def getRankMap(self, num_support=200):
-        if self.is_empty():
-            return {}
-        q = np.linspace(0.0, 1.0, num=min(self.n, num_support) + 2)
-        vals = sorted(set(self.sketch.get_quantiles(q.tolist())))
-        rank_map = {}
-        for val in vals:
-            frac = self.sketch.get_rank(float(val))
-            rank = max(1, min(self.n, int(round(frac * self.n))))
-            rank_map[val] = rank
-        sorted_items = sorted(rank_map.items())
-        last_rank = 0
-        fixed = {}
-        for v, r in sorted_items:
-            r = max(r, last_rank)
-            r = min(r, self.n)
-            if r <= last_rank and r < self.n:
-                r = last_rank + 1
-            last_rank = r
-            fixed[v] = r
-        return fixed
+TARGET_COL = "TARGET"
 
-    def getRank(self, key, rank_map):
-        if not rank_map:
-            return 0
-        if key in rank_map:
-            return rank_map[key]
-        keys = sorted(rank_map.keys())
-        if key < keys[0]:
-            return rank_map[keys[0]]
-        if key > keys[-1]:
-            return rank_map[keys[-1]]
-        lo, hi = 0, len(keys) - 1
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            if keys[mid] == key:
-                return rank_map[keys[mid]]
-            elif keys[mid] < key:
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        lower_key = keys[max(0, hi)]
-        upper_key = keys[min(len(keys) - 1, lo)]
-        if abs(key - lower_key) <= abs(upper_key - key):
-            return rank_map[lower_key]
-        else:
-            return rank_map[upper_key]
+X = df.drop(columns=[TARGET_COL])
+y = df[TARGET_COL]
 
+# ----------------------------
+# 2. ORDINAL ENCODING
+# ----------------------------
+ordinal_levels = sorted(y.unique())
+ordinal_map = {label: idx for idx, label in enumerate(ordinal_levels)}
+reverse_ordinal_map = {v: k for k, v in ordinal_map.items()}
 
-def select_metrics(linf_simple, n, m, correct_for_low_samples=False, alpha=None):
-    if not correct_for_low_samples or not alpha:
-        return float(linf_simple)
-    alpha = float(alpha)
-    alpha = min(max(alpha, 1e-12), 0.5)
-    eps_n = np.sqrt(max(0.0, np.log(2.0 / alpha) / (2.0 * max(n, 1.0))))
-    eps_m = np.sqrt(max(0.0, np.log(2.0 / alpha) / (2.0 * max(m, 1.0))))
-    corrected = linf_simple + (eps_n + eps_m)
-    return float(min(1.0, corrected))
+y_encoded = y.map(ordinal_map)
 
+# ----------------------------
+# 3. TRAIN / VALIDATION SPLIT (70 / 30)
+# ----------------------------
+X_train, X_val, y_train, y_val = train_test_split(
+    X,
+    y_encoded,
+    test_size=0.30,     # 30% validation
+    random_state=42
+)
 
-def numerical_distance(sample1, sample2, correct_for_low_samples=False, alpha=None):
-    rank_map1 = sample1.getRankMap()
-    rank_map2 = sample2.getRankMap()
-    combined_keys = sorted(set(rank_map1.keys()).union(rank_map2.keys()))
-    n = float(max(rank_map1.values()) if rank_map1 else 0)
-    m = float(max(rank_map2.values()) if rank_map2 else 0)
+# ----------------------------
+# 4. XGBOOST REGRESSOR
+# ----------------------------
+model = XGBRegressor(
+    objective="reg:squarederror",
+    n_estimators=500,
+    max_depth=6,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    reg_alpha=0.0,
+    reg_lambda=1.0,
+    random_state=42,
+    n_jobs=-1
+)
 
-    linf_simple = 0.0
-    for key in combined_keys:
-        cdf1 = (sample1.getRank(key, rank_map1) / n) if n > 0 else 0.0
-        cdf2 = (sample2.getRank(key, rank_map2) / m) if m > 0 else 0.0
-        cdf_diff = abs(cdf1 - cdf2)
-        if cdf_diff > linf_simple:
-            linf_simple = cdf_diff
-    return select_metrics(linf_simple, n, m, correct_for_low_samples, alpha)
+model.fit(
+    X_train,
+    y_train,
+    eval_set=[(X_val, y_val)],
+    verbose=False
+)
 
+# ----------------------------
+# 5. PREDICTION
+# ----------------------------
+y_val_pred_cont = model.predict(X_val)
 
-# --------------------------------------------------------
-# Overall drift computation (baseline vs new snapshot)
-# --------------------------------------------------------
-def compute_overall_drift(data_x, data_y,
-                          value_col="PFG_TNR_MO_CNT",
-                          kll_k=200,
-                          correct_for_low_samples=False,
-                          alpha=None):
-    vx = data_x[value_col].dropna().astype(float).values
-    vy = data_y[value_col].dropna().astype(float).values
+# Clamp predictions to valid ordinal range
+y_val_pred_cont = np.clip(
+    y_val_pred_cont,
+    y_encoded.min(),
+    y_encoded.max()
+)
 
-    qx = QuantileNonSample(vx, k=kll_k)
-    qy = QuantileNonSample(vy, k=kll_k)
+# Round to nearest ordinal level
+y_val_pred_ord = np.rint(y_val_pred_cont).astype(int)
 
-    dist = numerical_distance(qx, qy,
-                               correct_for_low_samples=correct_for_low_samples,
-                               alpha=alpha)
+# ----------------------------
+# 6. EVALUATION METRICS
+# ----------------------------
+mae = mean_absolute_error(y_val, y_val_pred_cont)
+rmse = np.sqrt(mean_squared_error(y_val, y_val_pred_cont))
 
-    return {
-        "n_x": int(qx.n),
-        "n_y": int(qy.n),
-        "linf_distance": dist
-    }
+qwk = cohen_kappa_score(
+    y_val,
+    y_val_pred_ord,
+    weights="quadratic"
+)
 
+print("========== MODEL EVALUATION ==========")
+print(f"MAE  : {mae:.4f}")
+print(f"RMSE : {rmse:.4f}")
+print(f"QWK  : {qwk:.4f}")
 
-# ---------------------- Example -------------------------
-# df_x = pd.DataFrame({"PFG_TNR_MO_CNT": np.random.normal(10, 2, 1000)})
-# df_y = pd.DataFrame({"PFG_TNR_MO_CNT": np.random.normal(12, 2, 200)})
-# result = compute_overall_drift(df_x, df_y,
-#                                correct_for_low_samples=True,
-#                                alpha=0.05)
-# print(result)
+# ----------------------------
+# 7. FINAL ORDINAL PREDICTIONS
+# ----------------------------
+y_val_pred_labels = pd.Series(y_val_pred_ord).map(reverse_ordinal_map)
+
+val_results = X_val.copy()
+val_results["ACTUAL"] = y_val.map(reverse_ordinal_map).values
+val_results["PREDICTED"] = y_val_pred_labels.values
+
+# ============================
+# END
+# ============================
