@@ -1,0 +1,160 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =========================
+# CONFIGURATION
+# =========================
+INVEST_PER_SIGNAL = 5000          # ₹
+DROP_THRESHOLD = -0.01            # -1%
+TXN_COST_RATE = 0.001             # 0.1%
+START_DATE = "2014-01-01"
+END_DATE = None                   # None = till last date
+
+# =========================
+# DATA PREPARATION
+# =========================
+df = df.copy()
+
+df["Date"] = pd.to_datetime(df["Date"])
+df = df.sort_values("Date").reset_index(drop=True)
+
+if START_DATE:
+    df = df[df["Date"] >= START_DATE]
+if END_DATE:
+    df = df[df["Date"] <= END_DATE]
+
+df = df.dropna(subset=["Open", "Close"]).reset_index(drop=True)
+
+# =========================
+# FEATURE ENGINEERING
+# =========================
+df["Prev_Close"] = df["Close"].shift(1)
+df["Daily_Return"] = (df["Close"] / df["Prev_Close"]) - 1
+
+# Buy signal: market drops ≥1%
+df["Signal"] = (df["Daily_Return"] <= DROP_THRESHOLD).astype(int)
+
+# Execute next day (avoid look-ahead bias)
+df["Execute"] = df["Signal"].shift(1)
+
+# =========================
+# EXECUTION LOGIC
+# =========================
+df["Investment"] = np.where(df["Execute"] == 1, INVEST_PER_SIGNAL, 0)
+
+df["Txn_Cost"] = df["Investment"] * TXN_COST_RATE
+df["Net_Investment"] = df["Investment"] - df["Txn_Cost"]
+
+df["Units_Bought"] = np.where(
+    df["Execute"] == 1,
+    df["Net_Investment"] / df["Open"],
+    0
+)
+
+# =========================
+# PORTFOLIO TRACKING
+# =========================
+df["Total_Units"] = df["Units_Bought"].cumsum()
+df["Total_Invested"] = df["Investment"].cumsum()
+
+df["Portfolio_Value"] = df["Total_Units"] * df["Close"]
+
+# =========================
+# FINAL METRICS
+# =========================
+final_value = df["Portfolio_Value"].iloc[-1]
+total_invested = df["Total_Invested"].iloc[-1]
+absolute_return = final_value - total_invested
+return_pct = (final_value / total_invested - 1) if total_invested > 0 else 0
+
+start_date = df.loc[df["Execute"] == 1, "Date"].min()
+end_date = df["Date"].iloc[-1]
+
+years = (end_date - start_date).days / 365.25
+cagr = (final_value / total_invested) ** (1 / years) - 1 if years > 0 else 0
+
+# =========================
+# RISK METRICS
+# =========================
+df["Portfolio_Return"] = df["Portfolio_Value"].pct_change()
+
+volatility = df["Portfolio_Return"].std() * np.sqrt(252)
+
+cum_max = df["Portfolio_Value"].cummax()
+drawdown = (df["Portfolio_Value"] - cum_max) / cum_max
+max_drawdown = drawdown.min()
+
+sharpe = (
+    df["Portfolio_Return"].mean()
+    / df["Portfolio_Return"].std()
+    * np.sqrt(252)
+)
+
+num_signals = int(df["Execute"].sum())
+signals_per_year = num_signals / years if years > 0 else 0
+
+# =========================
+# SUMMARY OUTPUT
+# =========================
+summary = pd.DataFrame({
+    "Metric": [
+        "Total Invested",
+        "Final Portfolio Value",
+        "Absolute Return",
+        "Return %",
+        "CAGR",
+        "Volatility",
+        "Max Drawdown",
+        "Sharpe Ratio",
+        "Number of Buy Signals",
+        "Signals per Year"
+    ],
+    "Value": [
+        round(total_invested, 2),
+        round(final_value, 2),
+        round(absolute_return, 2),
+        round(return_pct * 100, 2),
+        round(cagr * 100, 2),
+        round(volatility * 100, 2),
+        round(max_drawdown * 100, 2),
+        round(sharpe, 2),
+        num_signals,
+        round(signals_per_year, 2)
+    ]
+})
+
+print(summary)
+
+# =========================
+# VISUALS
+# =========================
+plt.figure(figsize=(12, 5))
+plt.plot(df["Date"], df["Close"], label="NIFTY Close", alpha=0.6)
+plt.scatter(
+    df.loc[df["Execute"] == 1, "Date"],
+    df.loc[df["Execute"] == 1, "Close"],
+    color="green",
+    s=25,
+    label="Buy Signal"
+)
+plt.title("NIFTY Close with Buy Signals")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 5))
+plt.plot(df["Date"], df["Portfolio_Value"], label="Portfolio Value")
+plt.plot(df["Date"], df["Total_Invested"], label="Total Invested", linestyle="--")
+plt.title("Portfolio Value vs Invested Amount")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 4))
+plt.fill_between(df["Date"], drawdown, 0, color="red", alpha=0.3)
+plt.title("Drawdown Curve")
+plt.show()
+
+plt.figure(figsize=(8, 4))
+df["Portfolio_Return"].hist(bins=50)
+plt.title("Distribution of Daily Portfolio Returns")
+plt.show()
